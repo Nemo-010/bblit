@@ -171,6 +171,42 @@ def main():
         if deref_kind and d['kind'] == 'uint':
             d['kind'] = deref_kind
 
+    # LP64 widen/conflict sets, shared by the header and body emitters.
+    # slots_pre: pointer-typed slots outside .text (widen candidates).
+    # A slot whose high half overlaps live non-slot data must not be
+    # widened in place (measured: 0x4b0900's write zeroed DAT_004b0904;
+    # 0x45f344's ate "BBLIT Game").  Those conflict slots are skipped in
+    # bblit_ptr_slots; the ones whose macro is an 8-byte pointer load
+    # (`*(data_u32 **)` / `*(code **)`) read side-table cells instead,
+    # because the load would over-read the same neighbour (measured:
+    # 0x45f344's load picked up "BBLI" and faulted winmain's LoadStringA).
+    # Cell exclusions: the arena sentinel pair (own side-table), 0x4b0900
+    # and 0x4ae8e4 (kept on explicit 4-byte views; values fit 32 bits),
+    # and 0x468750 (only ever address-taken, never read).
+    # NOTE: info keys are 8-hex with leading zeros and mixed case
+    # (e.g. '004ae8e0'), so these sets hold ints, not strings.
+    CELL_EXCLUDE = {0x4ae8e0, 0x4ae8e4, 0x4b0900, 0x4ae8e4, 0x468750}
+    slots_pre = sorted((a) for a, d in info.items()
+                       if (d['ptr'] or d['called'] or d['kind'] == 'ptr')
+                       and int(a, 16) >= CODE_END)
+    slots_pre_int = set(int(x, 16) for x in slots_pre)
+    def high_half_live(a):
+        s = int(a, 16)
+        if (s + 4) in slots_pre_int:
+            return False
+        return any(bytemap.get(s + i, 0) for i in range(4, 8))
+    conflict_addrs = set(a for a in slots_pre if high_half_live(a))
+    slots = [a for a in slots_pre
+             if not high_half_live(a) and int(a, 16) not in (0x4ae8e0, 0x4ae8e4)]
+    nskip = len(slots_pre) - len(slots)
+    # conflict slots needing cells (8-byte-load macros, minus exclusions).
+    # Cell i mirrors the image dword, zero-extended; reads and writes go
+    # through the cell at full 64-bit width.  data_u32* keeps the original
+    # dword scaling for `NAME + k` uses and preserves high function
+    # addresses (e.g. 0x4b091c) that a 4-byte slot could not hold.
+    cell_addrs = sorted((a for a in conflict_addrs if int(a, 16) not in CELL_EXCLUDE),
+                        key=lambda x: int(x, 16))
+
     # ---- emit data_syms.h -------------------------------------------------
     out = []
     words = (BLOB_END - BLOB_BASE) // 8
@@ -180,6 +216,11 @@ def main():
     out.append(f'#define BBLIT_CODE_END    0x{CODE_END:08x}u')
     out.append(f'#define BBLIT_BLOB_WORDS  {words}u')
     out.append('extern data_u64 bblit_image_blob[BBLIT_BLOB_WORDS];')
+    out.append('/* VC6 arena-list sentinel: side-table for the 0x4ae8e0/0x4ae8e4')
+    out.append(' * image slots (see the note at their sites below). */')
+    out.append('extern void *bblit_arena_sentinel[6];')
+    out.append('/* LP64 side-table cells for conflict slots (see above). */')
+    out.append(f'extern data_u32 *bblit_slot_cells[{len(cell_addrs)}];')
     out.append('void bblit_port_init(void);')
     out.append('')
     out.append('/* ---- data symbol views (all at original addresses) ---- */')
@@ -289,6 +330,18 @@ def main():
         ptrvar = (deref or nullcmp or cast_ptr or to_ptrvar or rhs_ptr) and not (
             scalar and not (deref or bare))
 
+        # VC6 sub-allocator arena-list sentinel (0x4ae8e0/0x4ae8e4): the two
+        # image slots sit 4 bytes apart, so neither can be widened in place,
+        # and the metadata layout needs 8-byte entries.  Head and tail live
+        # in bblit_arena_sentinel[] instead; every site using &SLOT, bare
+        # SLOT reads or SLOT writes keeps compiling because the macro stays
+        # an lvalue of pointer shape (see port_init, which self-links it).
+        if int(a, 16) in (0x4ae8e0, 0x4ae8e4):
+            sidx = 0 if int(a, 16) == 0x4ae8e0 else 1
+            for sym in sorted(d['syms']):
+                out.append(f'#define {sym} (bblit_arena_sentinel[{sidx}]) /* {d["label"] or a} */')
+            n += 1
+            continue
         if a in TYPE_OVERRIDES:
             k2, z2 = TYPE_OVERRIDES[a]
             v = view_macro(a, z2, k2)
@@ -326,6 +379,10 @@ def main():
             v = f'(*(data_u32 **)0x{a}ul)'
         else:
             v = view_macro(a, d['size'], d['kind'])
+        # LP64 side-table cell (see above): same lvalue shape, exact width.
+        if a in conflict_addrs and int(a, 16) not in CELL_EXCLUDE and (
+                v == f'(*(data_u32 **)0x{a}ul)' or v == f'(*(code **)0x{a}ul)'):
+            v = f'(bblit_slot_cells[{cell_addrs.index(a)}])'
         for sym in sorted(d['syms']):
             out.append(f'#define {sym} {v} /* {d["label"] or a} */')
         n += 1
@@ -421,29 +478,27 @@ def main():
 
     # referenced pointer-typed slots to widen
     # never widen inside .text: those dwords are data-shaped labels on code
-    # (jump-table heads etc), read-only and already executable
-    # never widen a slot whose high half overlaps live non-slot data:
-    # an 8-byte write there destroys the neighbour (measured: 0x4b0900's
-    # write zeroed DAT_004b0904, the sub-allocator limit; 0x45f344's ate
-    # "BBLIT Game").  Those slots keep 4-byte storage and every runtime
-    # value they hold fits 32 bits (image addresses, small ints, and the
-    # arena links, whose blocks come from a sub-2GiB reserve), so plain
-    # 4-byte reads zero-extend correctly with no macro changes.
-    slots_pre = sorted((a) for a, d in info.items()
-                       if (d['ptr'] or d['called'] or d['kind'] == 'ptr')
-                       and int(a, 16) >= CODE_END)
-    slots_pre_int = set(int(x, 16) for x in slots_pre)
-    def high_half_live(a):
-        s = int(a, 16)
-        if (s + 4) in slots_pre_int:
-            return False
-        return any(bytemap.get(s + i, 0) for i in range(4, 8))
-    slots = [a for a in slots_pre if not high_half_live(a)]
-    nskip = len(slots_pre) - len(slots)
+    # (jump-table heads etc), read-only and already executable.
+    # slots/conflict sets are computed once above (shared with the header
+    # emitter); conflict slots read side-table cells (see bblit_slot_cells).
+    # (nskip counts every slot left unwidened: live-high-half conflicts
+    # plus the arena sentinel pair.)
     body.append('static const unsigned bblit_ptr_slots[] = {')
     for a in slots:
         body.append(f'  0x{a},')
     body.append('};')
+    body.append('')
+    body.append('/* VC6 sub-allocator arena-list sentinel (replaces the image slots')
+    body.append(' * 0x4ae8e0/0x4ae8e4, which cannot be widened in place).  next+0 and')
+    body.append(' * prev+8 self-link; the rest stays zero so the arena walks in')
+    body.append(' * FUN_004522b0/452380/452440 skip the sentinel. */')
+    body.append('void *bblit_arena_sentinel[6] = {0};')
+    body.append('')
+    body.append('/* LP64 side-table cells for conflict slots (see above).  Cell i')
+    body.append(' * mirrors the image dword for its address, zero-extended; reads')
+    body.append(' * and writes go through the cell at full 64-bit width so neither')
+    body.append(' * the neighbour nor a high function address is ever clobbered. */')
+    body.append(f'data_u32 *bblit_slot_cells[{len(cell_addrs)}] = {{0}};')
     body.append('')
 
     body.append('void bblit_port_init(void);')
@@ -466,6 +521,13 @@ def main():
     body.append('    }')
     body.append('    mprotect((void *)BBLIT_BLOB_BASE, BBLIT_CODE_END - BBLIT_BLOB_BASE,')
     body.append('             PROT_READ | PROT_EXEC);')
+    body.append('    /* side-table cells snapshot the pristine image dwords FIRST:')
+    body.append('     * a skipped slot neighboring a widened one (e.g. 0x4ac310')
+    body.append('     * next to the widened 0x4ac30c) has its image bytes clobbered')
+    body.append('     * by the widening write (measured: the Cyrix needle cell')
+    body.append('     * snapshotted NULL). */')
+    for i, a in enumerate(cell_addrs):
+        body.append(f'    bblit_slot_cells[{i}] = (data_u32 *)(uintptr_t)*(volatile data_u32 *)0x{a}ul;')
     body.append('    /* Two phases: slots sit 4 bytes apart, so an in-place 8-byte')
     body.append('     * widening write clobbers the next slot\'s original value')
     body.append('     * (measured: 0x4ac30c\'s write zeroed 0x4ac310, whose needle')
@@ -480,13 +542,15 @@ def main():
     body.append('        *(void *volatile *)a =')
     body.append('            (void *)(uintptr_t)widen_snap[i];')
     body.append('    }')
+    body.append('    /* arena-list sentinel starts self-linked, like the image did. */')
+    body.append('    bblit_arena_sentinel[0] = bblit_arena_sentinel[1] = (void *)&bblit_arena_sentinel[0];')
     body.append('}')
 
     with open(args.body_out, 'w') as f:
         f.write('\n'.join(body) + '\n')
 
     print(f'{n} data addresses declared, {nstr} string labels, '
-          f'{nfn} trampolines, {len(slots)} pointer slots ({nskip} skipped: live high half), {nword} non-zero blob words')
+          f'{nfn} trampolines, {len(slots)} pointer slots ({nskip} skipped), {len(cell_addrs)} side-table cells, {nword} non-zero blob words')
 
 if __name__ == '__main__':
     main()

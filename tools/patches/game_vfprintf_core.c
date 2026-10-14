@@ -2,7 +2,20 @@
  * linux/bblit_game.c by tools/fix_loop.py.  Reason for the hand
  * port is documented at the top of the body.
  */
-undefined4 game_vfprintf_core(undefined4 param_1,char *param_2) {
+/* Format-char class table: binary bytes at 0x45cd30+c for c in
+ * 0x20..0x78 (extracted from bugs.exe; the decompile renders the base as
+ * the "?IsProcessorFeaturePresent" string, whose tail overlaps the table).
+ * A C string literal cannot reproduce the following bytes. */
+static const unsigned char fmt_class[89] = {
+  6, 0, 0, 6, 0, 1, 0, 0, 0, 0, 3, 6, 0, 6, 2, 0,
+  4, 5, 5, 5, 5, 5, 5, 5, 5, 5, 0, 0, 0, 0, 0, 0,
+  0, 0, 8, 8, 0, 8, 7, 8, 0, 7, 0, 0, 7, 0, 7, 0,
+  0, 0, 0, 8, 0, 0, 0, 0, 8, 0, 8, 0, 0, 0, 0, 0,
+  0, 0, 0, 8, 8, 8, 8, 8, 7, 8, 0, 0, 7, 0, 8, 8,
+  8, 0, 0, 8, 0, 8, 0, 7, 8,
+};
+
+undefined4 game_vfprintf_core(undefined4 param_1,char *param_2,data_u32 *param_3) {
   char cVar1;
   undefined1 uVar2;
   short sVar3;
@@ -43,6 +56,30 @@ undefined4 game_vfprintf_core(undefined4 param_1,char *param_2) {
   puVar15 = (void *)(char *)f00453400_frame;
   iVar11 = 0;
   puVar16 = (undefined1 *)0x0;
+  /* LP64 va/struct convention (replaces x86 slot staging).  On x86 the
+   * +0x260 slot carried the first arg (the print struct: [esp+0x260] is the
+   * arg slot, verified at the 0x453b70 call sequence) and +0x268 the va
+   * cursor (third arg).  Neither arrives in the port, so both are seeded
+   * from the C params; every slot traffic below then works unchanged in
+   * the vf_frame arena.  Outgoing-arg slots (-4..-0x24) are callee-
+   * invisible on LP64 and became direct calls.  Companion changes:
+   * FUN_00453e60's cursor cell widened to uintptr_t, FUN_00453e20 void ->
+   * long with silicon-faithful returns, __aullrem/__aulldiv are native
+   * 64-bit (divisor-hi slot +0x48 is never stored).  Deferred (unreached,
+   * same disease): the wide-char 53ea0/58400 sites, the float indirect
+   * calls, 53e80, and sprintf va-forwarding at FUN_00450420/450490. */
+  *(undefined4 *)(puVar15 + 0x260) = param_1;
+  *(undefined1 **)(puVar15 + 0x268) = (undefined1 *)param_3;
+  /* the decompile drops two more x86 arrivals the loop depends on: the
+   * counter at +0x1c (mov [esp+0x1c],0 at 0x453415; stale arena state made
+   * later calls loop wrong) and the format cursor at +0x264 (mov at
+   * 0x453422; a zero slot faulted the second print at game_vfprintf:35182). */
+  *(int *)(puVar15 + 0x1c) = 0;
+  /* LP64: +0x264 is a 4-byte x86 slot; an 8-byte char* store's high half
+   * zeroes the low 4 bytes of the +0x268 va cursor (observed: first %d
+   * fetch faulted on cur=0x7ffd00000000).  The format cursor is always an
+   * image address, so 4-byte traffic is exact. */
+  *(undefined4 *)(puVar15 + 0x264) = (undefined4)(uintptr_t)param_2;
   cVar13 = *param_2;
   param_2 = param_2 + 1;
   puVar14 = (void *)(char *)f00453400_frame;
@@ -52,28 +89,32 @@ undefined4 game_vfprintf_core(undefined4 param_1,char *param_2) {
         uVar4 = 0;
       }
       else {
-        uVar4 = (byte)"?IsProcessorFeaturePresent"[cVar13 + 0x19] & 0xf;
+        /* LP64: the class bytes are the binary's own data at 0x45cd30+c
+         * (verified: 'l'->7, 'x'->8); the C string literal is followed by
+         * unrelated .rodata so indexing 57..145 past it read garbage. */
+        uVar4 = fmt_class[cVar13 - ' '] & 0xf;
       }
-      cVar1 = (&DAT_0045cd50)[uVar4 * 8 + iVar11];
+      /* LP64: the dispatch reads BYTES (assembly movsx eax, BYTE PTR
+       * [ecx+eax*8+0x45cd50]); data_u32* indexing lands 4x too far
+       * (observed: literal 's' read state 6 instead of 0, literal 'n'
+       * fell into case 'n' and stored through a NULL fetch). */
+      cVar1 = ((signed char *)&DAT_0045cd50)[uVar4 * 8 + iVar11];
       *(int *)(puVar15 + 0x3c) = (int)cVar1 >> 4;
+      /* assembly 0x453470: cmp eax,7 / ja 0x453c3a — states 8..15 skip the
+       * 8-case dispatch and advance to the next format char. */
+      if (7 < ((int)cVar1 >> 4)) {
+        goto LAB_00453c3a;
+      }
       switch((int)cVar1 >> 4) {
       case 0:
 switchD_0045347d_caseD_0:
         *(undefined4 *)(puVar15 + 0x2c) = 0;
         if ((PTR_DAT_004b0a98[(*(uint *)(puVar15 + 0x40) & 0xff) * 2 + 1] & 0x80) != 0) {
-          *(undefined1 **)(puVar15 + -4) = puVar15 + 0x1c;
-          *(undefined4 *)(puVar15 + -8) = *(undefined4 *)(puVar15 + 0x260);
-          *(int *)(puVar15 + -0xc) = (int)cVar13;
-          *(undefined4 *)(puVar15 + -0x10) = 0x453630;
-          ((long (*)())FUN_00453d90)();
+          FUN_00453d90((int)cVar13,(int *)(uintptr_t)(*(undefined4 *)(puVar15 + 0x260)),(int *)(puVar15 + 0x1c));
           cVar13 = *param_2;
-          *(char **)(puVar15 + 0x264) = param_2 + 1;
+          *(undefined4 *)(puVar15 + 0x264) = (undefined4)(uintptr_t)(param_2 + 1);
         }
-        *(undefined1 **)(puVar15 + -4) = puVar15 + 0x1c;
-        *(undefined4 *)(puVar15 + -8) = *(undefined4 *)(puVar15 + 0x260);
-        *(int *)(puVar15 + -0xc) = (int)cVar13;
-        *(undefined4 *)(puVar15 + -0x10) = 0x453653;
-        ((long (*)())FUN_00453d90)();
+        FUN_00453d90((int)cVar13,(int *)(uintptr_t)(*(undefined4 *)(puVar15 + 0x260)),(int *)(puVar15 + 0x1c));
         break;
       case 1:
         *(undefined4 *)(puVar15 + 0x44) = 0;
@@ -104,9 +145,7 @@ switchD_0045347d_caseD_0:
         break;
       case 3:
         if (cVar13 == '*') {
-          *(undefined1 **)(puVar15 + -4) = puVar15 + 0x268;
-          *(undefined4 *)(puVar15 + -8) = 0x453524;
-          iVar11 = ((long (*)())FUN_00453e60)();
+                    iVar11 = (int)FUN_00453e60((uintptr_t *)(puVar15 + 0x268));
           *(int *)(puVar15 + 0x28) = iVar11;
           if (iVar11 < 0) {
             *(uint *)(puVar15 + 0x10) = *(uint *)(puVar15 + 0x10) | 4;
@@ -122,9 +161,7 @@ switchD_0045347d_caseD_0:
         break;
       case 5:
         if (cVar13 == '*') {
-          *(undefined1 **)(puVar15 + -4) = puVar15 + 0x268;
-          *(undefined4 *)(puVar15 + -8) = 0x453577;
-          iVar11 = ((long (*)())FUN_00453e60)();
+                    iVar11 = (int)FUN_00453e60((uintptr_t *)(puVar15 + 0x268));
           *(int *)(puVar15 + 0x18) = iVar11;
           if (iVar11 < 0) {
             *(undefined4 *)(puVar15 + 0x18) = 0xffffffff;
@@ -141,7 +178,7 @@ switchD_0045347d_caseD_0:
             *(undefined4 *)(puVar15 + 0x3c) = 0;
             goto switchD_0045347d_caseD_0;
           }
-          *(char **)(puVar15 + 0x264) = param_2 + 2;
+          *(undefined4 *)(puVar15 + 0x264) = (undefined4)(uintptr_t)(param_2 + 2);
           *(uint *)(puVar15 + 0x10) = *(uint *)(puVar15 + 0x10) | 0x8000;
           break;
         case 'h':
@@ -162,9 +199,7 @@ switchD_0045347d_caseD_0:
           }
         case 'c':
           if ((*(uint *)(puVar15 + 0x10) & 0x810) == 0) {
-            *(undefined1 **)(puVar15 + -4) = puVar15 + 0x268;
-            *(undefined4 *)(puVar15 + -8) = 0x4536fa;
-            uVar2 = ((long (*)())FUN_00453e60)();
+                        uVar2 = (undefined1)FUN_00453e60((uintptr_t *)(puVar15 + 0x268));
             puVar15[0x5c] = uVar2;
             puVar16 = (undefined1 *)0x1;
           }
@@ -245,9 +280,7 @@ switchD_0045347d_caseD_0:
           if (*(int *)(puVar15 + 0x18) != -1) {
             iVar11 = *(int *)(puVar15 + 0x18);
           }
-          *(undefined1 **)(puVar15 + -4) = puVar15 + 0x268;
-          *(undefined4 *)(puVar15 + -8) = 0x4537ab;
-          psVar6 = (short *)((long (*)())FUN_00453e60)();
+                    psVar6 = (short *)(uintptr_t)FUN_00453e60((uintptr_t *)(puVar15 + 0x268));
           *(short **)(puVar15 + 0x14) = psVar6;
           if ((*(uint *)(puVar15 + 0x10) & 0x810) == 0) {
             psVar12 = psVar6;
@@ -276,9 +309,7 @@ switchD_0045347d_caseD_0:
         case 'X':
           goto switchD_00453691_caseD_58;
         case 'Z':
-          *(undefined1 **)(puVar15 + -4) = puVar15 + 0x268;
-          *(undefined4 *)(puVar15 + -8) = 0x453720;
-          psVar6 = (short *)((long (*)())FUN_00453e60)();
+                    psVar6 = (short *)(uintptr_t)FUN_00453e60((uintptr_t *)(puVar15 + 0x268));
           if ((psVar6 == (short *)0x0) || (iVar11 = *(int *)(psVar6 + 2), iVar11 == 0)) {
             uVar4 = 0xffffffff;
             *(undefined **)(puVar15 + 0x14) = (undefined *)(PTR_DAT_004b0a90);
@@ -309,9 +340,7 @@ switchD_0045347d_caseD_0:
           *(uint *)(puVar15 + 0x10) = *(uint *)(puVar15 + 0x10) | 0x40;
           goto LAB_004539c7;
         case 'n':
-          *(undefined1 **)(puVar15 + -4) = puVar15 + 0x268;
-          *(undefined4 *)(puVar15 + -8) = 0x453833;
-          puVar7 = (undefined4 *)((long (*)())FUN_00453e60)();
+                    puVar7 = (undefined4 *)(uintptr_t)FUN_00453e60((uintptr_t *)(puVar15 + 0x268));
           if ((puVar15[0x10] & 0x20) == 0) {
             *(undefined4 *)(puVar15 + 0x34) = 1;
             *puVar7 = *(undefined4 *)(puVar15 + 0x1c);
@@ -346,28 +375,20 @@ LAB_004539c7:
           if ((uVar4 & 0x8000) == 0) {
             if ((uVar4 & 0x20) == 0) {
               if ((uVar4 & 0x40) == 0) {
-                *(undefined1 **)(puVar15 + -4) = puVar15 + 0x268;
-                *(undefined4 *)(puVar15 + -8) = 0x453a3f;
-                uVar8 = ((long (*)())FUN_00453e60)();
+                                uVar8 = (undefined4)FUN_00453e60((uintptr_t *)(puVar15 + 0x268));
                 uVar20 = (ulonglong)uVar8;
               }
               else {
-                *(undefined1 **)(puVar15 + -4) = puVar15 + 0x268;
-                *(undefined4 *)(puVar15 + -8) = 0x453a2c;
-                iVar11 = ((long (*)())FUN_00453e60)();
+                                iVar11 = (int)FUN_00453e60((uintptr_t *)(puVar15 + 0x268));
                 uVar20 = (ulonglong)iVar11;
               }
             }
             else if ((uVar4 & 0x40) == 0) {
-              *(undefined1 **)(puVar15 + -4) = puVar15 + 0x268;
-              *(undefined4 *)(puVar15 + -8) = 0x453a0f;
-              uVar8 = ((long (*)())FUN_00453e60)();
+                            uVar8 = (undefined4)FUN_00453e60((uintptr_t *)(puVar15 + 0x268));
               uVar20 = (ulonglong)(uVar8 & 0xffff);
             }
             else {
-              *(undefined1 **)(puVar15 + -4) = puVar15 + 0x268;
-              *(undefined4 *)(puVar15 + -8) = 0x4539f9;
-              sVar3 = ((long (*)())FUN_00453e60)();
+                            sVar3 = (short)FUN_00453e60((uintptr_t *)(puVar15 + 0x268));
               uVar20 = (ulonglong)(int)sVar3;
             }
           }
@@ -400,27 +421,33 @@ LAB_004539c7:
           *(undefined1 **)(puVar15 + 0x14) = puVar14;
           while ((*(int *)(puVar15 + 0x18) = iVar10 + -1, 0 < iVar10 || (lVar21 != 0))) {
             iVar11 = *(int *)(puVar15 + 0x30);
-            *(int *)(puVar15 + -4) = iVar11 >> 0x1f;
-            *(int *)(puVar15 + -8) = iVar11;
-            *(longlong *)(puVar15 + -0x10) = lVar21;
-            *(int *)(puVar15 + 0x58) = iVar11 >> 0x1f;
-            *(undefined4 *)(puVar15 + -0x14) = 0x453ac7;
-            iVar9 = ((long (*)())__aullrem)();
-            *(undefined4 *)(puVar15 + -0x14) = *(undefined4 *)(puVar15 + 0x48);
-            *(int *)(puVar15 + -0x18) = iVar11;
-            *(longlong *)(puVar15 + -0x20) = lVar21;
+            /* LP64: native 64-bit divide; x86 passed (lo,hi,blo,bhi). */
+            iVar9 = (int)__aullrem((ulonglong)lVar21,(ulonglong)(long long)iVar11);
             iVar9 = iVar9 + 0x30;
-            *(undefined4 *)(puVar15 + -0x24) = 0x453ad9;
-            lVar21 = ((long (*)())__aulldiv)();
+            /* LP64: native 64-bit divide; divisor-hi slot (+0x48) is never
+             * stored anywhere in this function, so it reads as 0 (entry note). */
+            lVar21 = (long long)__aulldiv((ulonglong)lVar21,(ulonglong)(long long)iVar11);
+            /* assembly 0x453ae2: add ebx,[esp+0x38] — the hex-letter bias
+             * (+0x38 = 7 for %X, 0x27 for %x), not the +0x18 counter. */
             if (0x39 < iVar9) {
-              iVar9 = iVar9 + *(int *)(puVar15 + 0x18);
+              iVar9 = iVar9 + *(int *)(puVar15 + 0x38);
             }
-            puVar14 = *(undefined1 **)(puVar15 + -0xc);
-            iVar10 = *(int *)(puVar15 + -8);
+            /* LP64: the decompile maps the [esp+0x14] digit pointer and
+             * [esp+0x18] counter onto outgoing-arg slots -0xc/-8
+             * (callee-invisible on LP64; -0xc read faulted) and invents a
+             * -0x20 frame walk the assembly has no trace of (the loop is
+             * 0x453aa2-0x453af5: reload, store, dec, spill, jmp). */
+            /* LP64: +0x14 (digit pointer) and +0x18 (counter) are adjacent
+             * 4-byte x86 slots; the 8-byte pointer spill's high half IS
+             * +0x18, so the while-condition's counter store zeroes... then
+             * destroys the pointer (observed: 2nd digit read
+             * slot14=0xffffffff4863a2da).  The C locals already carry both
+             * values across the pure div calls, so the loop keeps them in
+             * locals and never respills.  (Single-digit values survived
+             * only because post-loop code uses the local.) */
+            iVar10 = *(int *)(puVar15 + 0x18);
             *puVar14 = (char)iVar9;
             puVar14 = puVar14 + -1;
-            *(undefined1 **)(puVar15 + -0xc) = puVar14;
-            puVar15 = puVar15 + -0x20;
           }
           puVar16 = puVar15 + (0x25b - (long)(uintptr_t)puVar14);
           *(undefined1 **)(puVar15 + 0x14) = puVar14 + 1;
@@ -454,74 +481,42 @@ LAB_004539c7:
 LAB_00453b5f:
           iVar11 = (*(int *)(puVar15 + 0x28) - *(int *)(puVar15 + 0x24)) - (long)(uintptr_t)puVar16;
           if ((uVar4 & 0xc) == 0) {
-            uVar5 = *(undefined4 *)(puVar15 + 0x260);
-            *(undefined1 **)(puVar15 + -4) = puVar15 + 0x1c;
-            *(undefined4 *)(puVar15 + -8) = uVar5;
-            *(int *)(puVar15 + -0xc) = iVar11;
-            *(undefined4 *)(puVar15 + -0x10) = 0x20;
-            *(undefined4 *)(puVar15 + -0x14) = 0x453b85;
-            ((long (*)())FUN_00453de0)();
+            uVar5 = param_1;
+            FUN_00453de0(0x20,iVar11,uVar5,(int *)(puVar15 + 0x1c));
           }
           else {
-            uVar5 = *(undefined4 *)(puVar15 + 0x260);
+            uVar5 = param_1;
           }
-          *(undefined1 **)(puVar15 + -4) = puVar15 + 0x1c;
-          *(undefined4 *)(puVar15 + -8) = uVar5;
-          *(undefined4 *)(puVar15 + -0xc) = *(undefined4 *)(puVar15 + 0x24);
-          *(undefined1 **)(puVar15 + -0x10) = puVar15 + 0x22;
-          *(undefined4 *)(puVar15 + -0x14) = 0x453ba6;
-          ((long (*)())FUN_00453e20)();
+          FUN_00453e20((char *)(puVar15 + 0x22),*(int *)(puVar15 + 0x24),uVar5,(int *)(puVar15 + 0x1c));
           if (((uVar4 & 8) != 0) && ((uVar4 & 4) == 0)) {
-            *(undefined1 **)(puVar15 + -4) = puVar15 + 0x1c;
-            *(undefined4 *)(puVar15 + -8) = uVar5;
-            *(int *)(puVar15 + -0xc) = iVar11;
-            *(undefined4 *)(puVar15 + -0x10) = 0x30;
-            *(undefined4 *)(puVar15 + -0x14) = 0x453bc1;
-            ((long (*)())FUN_00453de0)();
+            FUN_00453de0(0x30,iVar11,uVar5,(int *)(puVar15 + 0x1c));
           }
           iVar10 = *(int *)(puVar15 + 0x2c);
           if ((iVar10 == 0) || ((long)(uintptr_t)puVar16 < 1)) {
-            *(undefined1 **)(puVar15 + -4) = puVar15 + 0x1c;
-            *(undefined4 *)(puVar15 + -8) = uVar5;
-            *(undefined1 **)(puVar15 + -0xc) = puVar16;
-            *(undefined4 *)(puVar15 + -0x10) = *(undefined4 *)(puVar15 + 0x14);
-            *(undefined4 *)(puVar15 + -0x14) = 0x453c77;
-            ((long (*)())FUN_00453e20)();
+            FUN_00453e20(*(char **)(puVar15 + 0x14),(int)(uintptr_t)puVar16,uVar5,(int *)(puVar15 + 0x1c));
           }
           else {
             puVar17 = *(undefined2 **)(puVar15 + 0x14);
             puVar14 = puVar16;
             do {
               puVar14 = puVar14 + -1;
-              *(uint *)(puVar15 + -4) = CONCAT22((short)((uint)iVar10 >> 0x10),*puVar17);
-              *(undefined1 **)(puVar15 + -8) = puVar15 + 0x48;
+              iVar10 = FUN_00458400((LPSTR)(puVar15 + 0x48),(ushort)*puVar17);
               puVar17 = puVar17 + 1;
-              *(undefined4 *)(puVar15 + -0xc) = 0x453bf0;
-              iVar10 = ((long (*)())FUN_00458400)();
               if (iVar10 < 1) break;
-              *(undefined1 **)(puVar15 + -4) = puVar15 + 0x1c;
-              *(undefined4 *)(puVar15 + -8) = *(undefined4 *)(puVar15 + 0x260);
-              *(int *)(puVar15 + -0xc) = iVar10;
-              *(undefined1 **)(puVar15 + -0x10) = puVar15 + 0x48;
-              *(undefined4 *)(puVar15 + -0x14) = 0x453c0f;
-              iVar10 = ((long (*)())FUN_00453e20)();
+              iVar10 = (int)FUN_00453e20((char *)(puVar15 + 0x48),iVar10,*(undefined4 *)(puVar15 + 0x260),(int *)(puVar15 + 0x1c));
             } while (puVar14 != (undefined1 *)0x0);
             uVar4 = *(uint *)(puVar15 + 0x10);
           }
           if ((uVar4 & 4) != 0) {
-            *(undefined1 **)(puVar15 + -4) = puVar15 + 0x1c;
-            *(undefined4 *)(puVar15 + -8) = *(undefined4 *)(puVar15 + 0x260);
-            *(int *)(puVar15 + -0xc) = iVar11;
-            *(undefined4 *)(puVar15 + -0x10) = 0x20;
-            *(undefined4 *)(puVar15 + -0x14) = 0x453c37;
-            ((long (*)())FUN_00453de0)();
+            FUN_00453de0(0x20,iVar11,uVar5,(int *)(puVar15 + 0x1c));
           }
         }
       }
-      cVar13 = **(char **)(puVar15 + 0x264);
-      param_2 = *(char **)(puVar15 + 0x264) + 1;
+LAB_00453c3a:
+      cVar13 = *(char *)(uintptr_t)(*(undefined4 *)(puVar15 + 0x264));
+      param_2 = (char *)(uintptr_t)(*(undefined4 *)(puVar15 + 0x264)) + 1;
       puVar15[0x40] = cVar13;
-      *(char **)(puVar15 + 0x264) = param_2;
+      *(undefined4 *)(puVar15 + 0x264) = (undefined4)(uintptr_t)param_2;
       if (cVar13 == '\0') break;
       local_234 = *(int *)(puVar15 + 0x28);
       iVar11 = *(int *)(puVar15 + 0x3c);

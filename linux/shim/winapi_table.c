@@ -43,7 +43,11 @@ LPVOID GetEnvironmentStringsW(void) { return (LPVOID)L"\0"; }
 LPVOID FreeEnvironmentStringsW(LPVOID p) { (void)p; return 0; }
 uint32_t GetACP(void) { return 1252; }
 uint32_t GetOEMCP(void) { return 850; }
-BOOL GetCPInfo(UINT cp, CPINFO *ci) { (void)cp; memset(ci, 0, sizeof(CPINFO)); ci->MaxCharSize = 1; return 1; }
+/* The game's only GetCPInfo site passes a 4-byte _cpinfo local whose
+ * contents it never reads (verified: FUN_00457330 checks just the
+ * return value), so fill only MaxCharSize.  Writing the full 524-byte
+ * CPINFO (observed ASan overflow) would smash the caller's frame. */
+BOOL GetCPInfo(UINT cp, CPINFO *ci) { (void)cp; ci->MaxCharSize = 1; return 1; }
 BOOL GetStringTypeA(DWORD l, DWORD t, LPCSTR s, int c, LPWORD o)
 { (void)l; (void)t; (void)c; (void)s; (void)o; return 0; }  /* STUB-DIVERGENCE */
 INT LCMapStringA(DWORD l, DWORD f, LPCSTR s, int n, LPSTR d, int dn)
@@ -52,10 +56,23 @@ LANGID GetSystemDefaultLangID(void) { return 0x0409; }
 DWORD GetModuleFileNameA(HMODULE h, LPSTR out, DWORD n)
 { (void)h; ssize_t r = readlink("/proc/self/exe", out, n - 1); return r > 0 ? (DWORD)strlen(out) : 0; }
 HMODULE GetModuleHandleA(LPCSTR name) { (void)name; return (HMODULE)0x10000; }
-void GetStartupInfoA(LPSTARTUPINFOA si) { memset(si, 0, sizeof(*si)); si->cb = sizeof(*si); }
+/* The x86 STARTUPINFOA is 68 bytes; ours is bigger (LP64 pointers), and
+ * the game passes its 68-byte decompile local (observed: ASan
+ * stack-buffer-overflow in FUN_004530b0, smashing the canary and
+ * aborting later in FUN_00453e60).  Fill the x86 size with the x86
+ * layout (all zeros + cb): the game's wShowWindow/count reads then see
+ * 0 and it skips handle inheritance, falling back to GetStdHandle. */
+void GetStartupInfoA(LPSTARTUPINFOA si) { memset(si, 0, 68); *(DWORD *)si = 68; }
 
 /* ---- console / stdio ---- */
 static FILE * stdh(int fd) { switch (fd) { case 0: return stdin; case 1: return stdout; default: return stderr; } }
+/* CRT-level std handles (0/1/2, e.g. from the image's handle table) are
+ * small ints, not our FILE* HANDLEs; route them to stdio (observed: the
+ * sysinfo flush wrote through (FILE*)1 and faulted in fwrite). */
+static FILE *handle_file(HANDLE h)
+{ uintptr_t v = (uintptr_t)h;
+  if (v <= 2) return stdh((int)v);
+  return (FILE *)h; }
 BOOL SetStdHandle(int which, HANDLE h) { (void)which; (void)h; return 1; }
 HANDLE GetStdHandle(int which) { return (HANDLE)stdh(which == -10 ? 0 : which == -11 ? 1 : 2); }
 DWORD GetFileType(HANDLE h)
@@ -97,14 +114,14 @@ HANDLE CreateFileA(LPCSTR name, DWORD access, DWORD share,
   return f ? (HANDLE)f : INVALID_HANDLE_VALUE; }
 BOOL ReadFile(HANDLE h, LPVOID buf, DWORD n, LPDWORD read, void *over)
 { (void)over; if (!h || h == INVALID_HANDLE_VALUE) return 0;
-  size_t r = fread(buf, 1, n, (FILE *)h); if (read) *read = (DWORD)r; return r == n; }
+  size_t r = fread(buf, 1, n, handle_file(h)); if (read) *read = (DWORD)r; return r == n; }
 BOOL WriteFile(HANDLE h, LPCVOID buf, DWORD n, LPDWORD w, void *over)
 { (void)over; if (!h || h == INVALID_HANDLE_VALUE) return 0;
-  size_t r = fwrite(buf, 1, n, (FILE *)h); if (w) *w = (DWORD)r; return r == n; }
-BOOL SetEndOfFile(HANDLE h) { return h ? (fflush((FILE *)h), 1) : 0; }
+  size_t r = fwrite(buf, 1, n, handle_file(h)); if (w) *w = (DWORD)r; return r == n; }
+BOOL SetEndOfFile(HANDLE h) { return h ? (fflush(handle_file(h)), 1) : 0; }
 DWORD SetFilePointer(HANDLE h, LONG dist, LPLONG hi, DWORD how)
 { (void)hi; if (!h) return (DWORD)-1; int w = how == 0 ? SEEK_SET : how == 1 ? SEEK_CUR : SEEK_END;
-  long r = fseek((FILE *)h, dist, w); return r ? (DWORD)-1 : (DWORD)ftell((FILE *)h); }
+  long r = fseek(handle_file(h), dist, w); return r ? (DWORD)-1 : (DWORD)ftell(handle_file(h)); }
 BOOL CloseHandle(HANDLE h)
 { if (!h || h == INVALID_HANDLE_VALUE) return 0;
   if (h == (HANDLE)0xffffffffffffffffull || h == (HANDLE)0xfffffffffffffffeull) return 1;

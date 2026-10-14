@@ -594,12 +594,33 @@ def join_statements(lines):
             return True
         return False
     for l in lines:
-        if out and not ends_statement(out[-1]):
+        if out and not ends_statement(out[-1]) and not _comment_edge(out[-1], l):
             out[-1] = out[-1].rstrip() + ' ' + l.strip()
             removed += 1
         else:
             out.append(l)
     return out, removed
+
+
+def _comment_edge(prev, cur):
+    """True when joining prev+cur would glue a block-comment interior line.
+
+    A /* opener (or interior `*` leader) never ends a statement, so without
+    this the pass reflows every multi-line comment onto one line each run.
+    That breaks the HAND_FIXES `new in text` idempotency guard (the new text
+    no longer matches verbatim) and the entry re-applies, duplicating its
+    payload -- measured: `char slots_54000[0x480];` doubled, failing the
+    build with a redeclaration error.  The star-space test keeps real code
+    joinable: continuation dereferences are `*p`/`*(t`, never `*`-space."""
+    cs = cur.strip()
+    if cs.startswith('*') and (len(cs) == 1 or cs[1] in ' /'):
+        return True
+    ps = prev.strip()
+    if ps.startswith('/*') and '*/' not in ps:
+        return True
+    if ps.startswith('*') and (len(ps) == 1 or ps[1] in ' /'):
+        return True
+    return False
 
 # ------------------------------------------------------- one-shot rewrites
 # hand fixes for sites the mechanical passes cannot type-resolve.  Each entry
@@ -655,6 +676,372 @@ HAND_FIXES = [
     ("  char *pcVar2;\n  size_t in_ECX;\n  uint uVar3;",
      "  char *pcVar2;\n  uint uVar3;"),
     ("  void *in_ECX;", "  size_t in_ECX;"),
+    # ogl_load_dll/ogl_init: the LoadLibraryA/FreeLibrary prologues stage the
+    # dll name and HMODULE through 4-byte x86 frame slots (puVar4-4 etc).
+    # On LP64 the pointer stores are 8 bytes and underflow the gcc locals
+    # (ASan: WRITE size 8, ogl_load_dll:7706).  Call the shims directly; the
+    # 0x40e0xx/0x40ebxx stores were x86 return-address markers.
+    ("""  *(char **)(puVar4 + -4) = g_OPENGL_DLL;
+  *(undefined4 *)(puVar4 + -8) = 0x40e084;
+  DAT_009ca724 = (uintptr_t)(LoadLibraryA(*(LPCSTR *)(puVar4 + -4)));""",
+     """  /* LP64: puVar4-4 is a 4-byte x86 slot; the 8-byte pointer store there
+   * underflows the gcc local (ASan WRITE size 8, ogl_load_dll:7706), so call
+   * the shim directly.  The 0x40e0xx stores were x86 return markers. */
+  DAT_009ca724 = (uintptr_t)(LoadLibraryA(g_OPENGL_DLL));"""),
+    ("""    *(undefined4 *)(puVar4 + -8) = 0x40e093;
+    DVar1 = GetLastError();""",
+     "    DVar1 = GetLastError();"),
+    ("""            *(HMODULE *)(puVar12 + -4) = (HMODULE)(uintptr_t)(DAT_009ca724);
+            *(undefined4 *)(puVar12 + -8) = 0x40eb09;
+            FreeLibrary(*(HMODULE *)(puVar12 + -4));""",
+     """            /* LP64: direct call; the puVar12-4 slot store overflows (see above). */
+            FreeLibrary((void *)(uintptr_t)(DAT_009ca724));"""),
+    ("""          *(char **)(puVar16 + -4) = g_OPENGL_DLL;
+          *(undefined4 *)(puVar16 + -8) = 0x40eb1a;
+          DAT_009ca724 = (uintptr_t)(LoadLibraryA(*(LPCSTR *)(puVar16 + -4)));""",
+     """          /* LP64: direct call; the puVar16-4 slot store overflows (see above). */
+          DAT_009ca724 = (uintptr_t)(LoadLibraryA(g_OPENGL_DLL));"""),
+    ("""            *(undefined4 *)(puVar16 + -8) = 0x40eb2b;
+            DVar8 = GetLastError();""",
+     "            DVar8 = GetLastError();"),
+    # winmain: acStack_14e (2B at EBP-0x14e) packs exactly between local_250
+    # (258B ending at -0x14e) and local_14c (260B starting at -0x14c); arrays
+    # index upward, so acStack_14e[i] is local_14c[i-2].  The strlen loop
+    # leaves ~uVar11 = len+1, i.e. this is a trailing-backslash check on the
+    # last path char.  Separate gcc locals here, so index local_14c directly.
+    ("""  if (acStack_14e[(long)(int)(~uVar11)] != '\\\\') {""",
+     """  /* LP64: acStack_14e (2B at EBP-0x14e) packed exactly between local_250 and
+   * local_14c, arrays index upward, so acStack_14e[i] is local_14c[i-2]; the
+   * strlen loop above leaves ~uVar11 = len+1, i.e. this checks the last path
+   * char for a trailing backslash.  The arrays are separate gcc locals here. */
+  if (local_14c[(long)(int)(~uVar11) - 2] != '\\\\') {"""),
+    # sysinfo_cpu_detect: the EFLAGS pushfw dances are silicon-dead (see
+    # the note in the replacement) and the decompile models them in x86
+    # frame slots off puVar12 (ASan WRITE, sysinfo_cpu_detect:18495).
+    ("""  _DAT_004b3fec = 0;
+  *(ushort *)((long)(uintptr_t)puVar12 + -2) = (ushort)(in_NT & 1) * 0x4000 | (ushort)(bVar3 & 1) * 0x400 | (ushort)(in_IF & 1) * 0x200 | (ushort)(in_TF & 1) * 0x100 | 0x40 | (ushort)(in_AF & 1) * 0x10 | 4;
+  uVar16 = *(uint *)((long)(uintptr_t)puVar12 + -2);
+  *(uint *)((long)(uintptr_t)puVar12 + -2) = uVar16 ^ 0x200000;
+  uVar22 = *(ushort *)((long)(uintptr_t)puVar12 + -2);
+  bVar21 = (uVar22 & 0x4000) != 0;
+  bVar20 = (uVar22 & 0x400) != 0;
+  bVar19 = (uVar22 & 0x200) != 0;
+  bVar18 = (uVar22 & 0x100) != 0;
+  bVar17 = (uVar22 & 0x10) != 0;
+  *(ushort *)((long)(uintptr_t)puVar12 + -2) = (ushort)bVar21 * 0x4000 | (ushort)((uVar22 & 0x800) != 0) * 0x800 | (ushort)bVar20 * 0x400 | (ushort)bVar19 * 0x200 | (ushort)bVar18 * 0x100 | (ushort)((uVar22 & 0x80) != 0) * 0x80 | (ushort)((uVar22 & 0x40) != 0) * 0x40 | (ushort)bVar17 * 0x10 | (ushort)((uVar22 & 4) != 0) * 4 | (ushort)((uVar22 & 1) != 0);
+  local_8 = (uint)(*(uint *)((long)(uintptr_t)puVar12 + -2) != uVar16);
+  if (local_8 == 0) {
+    _DAT_004b3fe0 = (data_u32 *)(uintptr_t)(*(int *)PTR_s_NoVendorName_004ac30c);
+    _DAT_004b3fe4 = (data_u32 *)(uintptr_t)(*(uint *)(PTR_s_NoVendorName_004ac30c + 4));
+    _DAT_004b3fe8 = (data_u32 *)(uintptr_t)(*(int *)(PTR_s_NoVendorName_004ac30c + 8));
+    DAT_004b1dd4 = (data_u32 *)(uintptr_t)(1);
+    *(ushort *)puVar12 = (ushort)bVar21 * 0x4000 | (ushort)bVar20 * 0x400 | (ushort)bVar19 * 0x200 | (ushort)bVar18 * 0x100 | 0x40 | (ushort)bVar17 * 0x10 | 4;
+    uVar16 = *puVar12;
+    *puVar12 = uVar16 ^ 0x40000;
+    uVar2 = *puVar12;
+    *(ushort *)puVar12 = (ushort)((uVar2 & 0x4000) != 0) * 0x4000 | (ushort)((uVar2 & 0x800) != 0) * 0x800 | (ushort)((uVar2 & 0x400) != 0) * 0x400 | (ushort)((uVar2 & 0x200) != 0) * 0x200 | (ushort)((uVar2 & 0x100) != 0) * 0x100 | (ushort)((uVar2 & 0x80) != 0) * 0x80 | (ushort)((uVar2 & 0x40) != 0) * 0x40 | (ushort)((uVar2 & 0x10) != 0) * 0x10 | (ushort)((uVar2 & 4) != 0) * 4 | (ushort)((uVar2 & 1) != 0);
+    uVar2 = *puVar12;
+    *puVar12 = uVar16;
+    if (uVar2 == uVar16) {
+      *(undefined4 *)((long)(uintptr_t)puVar12 + -2) = in_CR0;
+      local_8 = 1;
+      DAT_004b3ff0 = (data_u32 *)(uintptr_t)(3);
+      DAT_004b3ff4 = 0;
+    }
+    else {
+      local_8 = 1;
+      _DAT_004b3fe0 = (data_u32 *)(uintptr_t)(*(int *)PTR_s_CyrixInstead_004ac310);
+      _DAT_004b3fe4 = (data_u32 *)(uintptr_t)(*(uint *)(PTR_s_CyrixInstead_004ac310 + 4));
+      _DAT_004b3fe8 = (data_u32 *)(uintptr_t)(*(int *)(PTR_s_CyrixInstead_004ac310 + 8));
+      ((ushort *)((long)(uintptr_t)puVar12 + -2))[0] = 0xa3ec;
+      ((ushort *)((long)(uintptr_t)puVar12 + -2))[1] = 0x42;
+      FUN_00429f90();
+    }
+  }
+  else {
+    DAT_004b1ddc = 1;
+    piVar1 = (int *)cpuid_basic_info(0);
+    DAT_004b3fc8 = *piVar1;
+    _DAT_004b3fe0 = (data_u32 *)(uintptr_t)(piVar1[1]);
+    _DAT_004b3fe4 = (data_u32 *)(uintptr_t)(piVar1[2]);
+    _DAT_004b3fe8 = (data_u32 *)(uintptr_t)(piVar1[3]);
+    DAT_004b3fcc = (uintptr_t)(_DAT_004b3fe0);
+    DAT_004b3fd0 = (uintptr_t)(_DAT_004b3fe8);
+    DAT_004b3fd4 = (uintptr_t)(_DAT_004b3fe4);
+    if (0 < DAT_004b3fc8) {
+      piVar1 = (int *)cpuid_Version_info(1);
+      DAT_004b3fc8 = *piVar1;
+      DAT_004b3fcc = piVar1[1];
+      DAT_004b3fd4 = piVar1[2];
+      DAT_004b3fd0 = piVar1[3];
+      DAT_004b3ff4 = (data_u32 *)(uintptr_t)(DAT_004b3fc8 >> 4 & 0xf);
+      DAT_004b3ff0 = (data_u32 *)(uintptr_t)(DAT_004b3fc8 >> 8 & 0xf);
+      DAT_004b1dd4 = (data_u32 *)(uintptr_t)(DAT_004b3fd4 & 1);
+      DAT_004b1dd8 = (data_u32 *)(uintptr_t)(DAT_004b3fd4 >> 0x17 & 1);
+    }
+  }""",
+     """  /* Hand port from the assembly (objdump .text @0042a1c6-0042a402): the
+   * pushfw dances use 16-bit pushes (`66 9c`), so the bit-21/bit-18 toggles
+   * are truncated and can never stick; tracing the stack slots shows dance 1
+   * (CPUID bit) always yields 0 and dance 2 (AC bit) always yields 1, and the
+   * DIV test yields 1 on 286+.  The CPUID branch is dead code on every real
+   * CPU: the game always takes the vendor-table path below (FPU always
+   * present, so DAT_004b1dd4 = 1).  The decompile instead models EFLAGS in
+   * x86 frame slots off puVar12, whose stores underflow the gcc locals
+   * (ASan WRITE size 2, sysinfo_cpu_detect:18495).  Replaced with the
+   * silicon-observable sequence; the 1dd4/1de0/3ff0/strstr tail below is
+   * unchanged and matches the assembly at 0042a402-0042a44f. */
+  _DAT_004b3fe0 = (data_u32 *)(uintptr_t)0;
+  _DAT_004b3fe4 = (data_u32 *)(uintptr_t)0;
+  _DAT_004b3fe8 = (data_u32 *)(uintptr_t)0;
+  _DAT_004b3fec = 0;
+  _DAT_004b3fe0 = (data_u32 *)(uintptr_t)(*(int *)PTR_s_NoVendorName_004ac30c);
+  _DAT_004b3fe4 = (data_u32 *)(uintptr_t)(*(uint *)(PTR_s_NoVendorName_004ac30c + 4));
+  _DAT_004b3fe8 = (data_u32 *)(uintptr_t)(*(int *)(PTR_s_NoVendorName_004ac30c + 8));
+  DAT_004b1dd4 = (data_u32 *)(uintptr_t)(1);
+  _DAT_004b3fe0 = (data_u32 *)(uintptr_t)(*(int *)PTR_s_CyrixInstead_004ac310);
+  _DAT_004b3fe4 = (data_u32 *)(uintptr_t)(*(uint *)(PTR_s_CyrixInstead_004ac310 + 4));
+  _DAT_004b3fe8 = (data_u32 *)(uintptr_t)(*(int *)(PTR_s_CyrixInstead_004ac310 + 8));
+  FUN_00429f90();"""),
+    # sysinfo_cpu_detect timer branch: return-marker stores through x86
+    # frame slots underflow the gcc locals (ASan WRITE size 2 at 18595);
+    # the assembly at 0042a525/0042a59d passes handle+priority directly.
+    ("""  else {\n    uVar16 = 0xffffffff;
+    ((ushort *)((long)(uintptr_t)puVar12 + -2))[0] = 0xa52e;
+    ((ushort *)((long)(uintptr_t)puVar12 + -2))[1] = 0x42;
+    pvVar11 = GetCurrentThread();
+    puVar14 = (ushort *)((long)(uintptr_t)puVar12 + -2);
+    *(HANDLE *)((long)(uintptr_t)puVar12 + -2) = pvVar11;
+    ((ushort *)((long)(uintptr_t)puVar12 + -6))[0] = 0xa53a;
+    ((ushort *)((long)(uintptr_t)puVar12 + -6))[1] = 0x42;
+    local_10 = pvVar11;
+    iVar15 = GetThreadPriority(*(HANDLE *)((long)(uintptr_t)puVar12 + -2));
+    if (iVar15 != 0x7fffffff) {
+      *(int *)((long)(uintptr_t)puVar12 + -6) = iVar15 + 1;
+      puVar14 = (ushort *)((long)(uintptr_t)puVar12 + -10);
+      *(HANDLE *)((long)(uintptr_t)puVar12 + -10) = pvVar11;
+      ((ushort *)((long)(uintptr_t)puVar12 + -0xe))[0] = 0xa54f;
+      ((ushort *)((long)(uintptr_t)puVar12 + -0xe))[1] = 0x42;
+      SetThreadPriority(*(HANDLE *)((long)(uintptr_t)puVar12 + -10),*(int *)((long)(uintptr_t)puVar12 + -6));
+    }""",
+     """  else {
+    uVar16 = 0xffffffff;
+    /* LP64: the 0xa52e/0xa53a/0xa54f stores are x86 return markers staged
+     * through 4-byte frame slots; on LP64 they underflow the gcc locals
+     * (ASan WRITE size 2, sysinfo_cpu_detect:18595).  The assembly at
+     * 0042a525 passes the thread handle and priority directly. */
+    pvVar11 = GetCurrentThread();
+    local_10 = pvVar11;
+    iVar15 = GetThreadPriority(pvVar11);
+    if (iVar15 != 0x7fffffff) {
+      SetThreadPriority(pvVar11,iVar15 + 1);
+    }"""),
+    ("""    if (iVar15 != 0x7fffffff) {\n      *(int *)((long)(uintptr_t)puVar14 + -4) = iVar15;
+      *(HANDLE *)((long)(uintptr_t)puVar14 + -8) = local_10;
+      *(undefined4 *)((long)(uintptr_t)puVar14 + -0xc) = 0x42a5b0;
+      SetThreadPriority(*(HANDLE *)((long)(uintptr_t)puVar14 + -8),*(int *)((long)(uintptr_t)puVar14 + -4));
+    }""",
+     """    if (iVar15 != 0x7fffffff) {
+      /* LP64: direct call; the puVar14-slot stores overflow (see above). */
+      SetThreadPriority(local_10,iVar15);
+    }"""),
+    # printf core (game_vfprintf_core family): outgoing-arg frame slots are
+    # callee-invisible on LP64; converted to direct calls with assembly-
+    # verified arg orders (see the entry note in tools/patches/game_vfprintf_core.c).
+    ("""undefined4 FUN_00451a50(undefined4 param_1) {
+  void *stack0x00000008;
+  undefined4 uVar1;
+  undefined4 uVar2;
+  
+  uVar1 = FUN_00453f00(&DAT_004ae668);
+  uVar2 = ((long (*)())game_vfprintf_core)(&DAT_004ae668,param_1,((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)&stack0x00000008)))))))))))))))))));
+  FUN_00453fa0(uVar1,&DAT_004ae668);
+  return uVar2;
+}
+""",
+     """/* LP64: variadic forwarder.  On x86 this pushed &(caller's arg area) as the
+ * va cursor for game_vfprintf_core's slot machine; here the C varargs are
+ * spilled into 4-byte slots (the widths the machine advances by).  Values
+ * are exact for ints and image addresses; slots the format never consumes
+ * may hold caller-stack window data, exactly as the original's stack window
+ * did.  12 slots cover every in-tree format (max observed: 2 args). */
+undefined4 FUN_00451a50(undefined4 param_1, ...) {
+  undefined4 uVar1;
+  undefined4 uVar2;
+  data_u32 va_args[12];
+  va_list ap;
+
+  uVar1 = FUN_00453f00(&DAT_004ae668);
+  va_start(ap,param_1);
+  for (int i = 0; i < 12; i++) va_args[i] = (data_u32)va_arg(ap,uintptr_t);
+  va_end(ap);
+  uVar2 = game_vfprintf_core((undefined4)(uintptr_t)&DAT_004ae668,(char *)(uintptr_t)param_1,va_args);
+  FUN_00453fa0(uVar1,&DAT_004ae668);
+  return uVar2;
+}
+"""),
+    ("""undefined4 FUN_00453e60(int *param_1) {
+  undefined4 *puVar1;
+  
+  puVar1 = (undefined4 *)*param_1;
+  *param_1 = (int)(puVar1 + 1);
+  return *puVar1;
+}""",
+     """/* LP64: the va cursor cell holds a host address, so the int cell
+ * truncated it on every advance (observed via the 53e60-fed %d garbage).
+ * Widened to uintptr_t; the fetched arg stays a 4-byte value exactly as
+ * on x86.  Caller sites pass &(cursor) instead of frame slots. */
+undefined4 FUN_00453e60(uintptr_t *param_1) {
+  undefined4 *puVar1;
+
+  puVar1 = (undefined4 *)(*param_1);
+  *param_1 = (uintptr_t)(puVar1 + 1);
+  return *puVar1;
+}"""),
+    ("""void FUN_00453e20(char *param_1,int param_2,undefined4 param_3,int *param_4) {""",
+     """/* LP64: returns the leftover eax like the silicon: counter-ptr on success
+ * (here 1: only the sign is consumed and the high bits are discarded by the
+ * caller, while a truncated host pointer could compare < 1), param_2 when
+ * nothing ran, -1 on error.  Promoted void -> long like fix_void_value_used. */
+long FUN_00453e20(char *param_1,int param_2,undefined4 param_3,int *param_4) {"""),
+    ("""  do {
+    if (param_2 < 1) {
+      return;
+    }
+    param_2 = param_2 + -1;
+    cVar1 = *param_1;""",
+     """  do {
+    if (param_2 < 1) {
+      return param_2;
+    }
+    param_2 = param_2 + -1;
+    cVar1 = *param_1;"""),
+    ("""    FUN_00453d90((int)cVar1,(int *)(uintptr_t)(param_3),param_4);
+  } while (*param_4 != -1);
+  return;
+}""",
+     """    FUN_00453d90((int)cVar1,(int *)(uintptr_t)(param_3),param_4);
+  } while (*param_4 != -1);
+  return (*param_4 == -1) ? -1 : 1;
+}"""),
+    # FUN_00454000: the translation buffer and outgoing-arg slots are
+    # addressed off x86 frame anchors (ASan overflow at 35441); a real
+    # 0x480 arena replaces both slots.
+    ("""        piVar6 = (int *)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)&stack0xfffffbc0))))))))))))))))));""",
+     """        piVar6 = (int *)(slots_54000 + 0x20);"""),
+    ("""          piVar6 = (int *)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)&stack0xfffffbc0))))))))))))))))));""",
+     """          piVar6 = (int *)(slots_54000 + 0x20);"""),
+    ("""        piVar6 = (int *)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)&stack0xfffffbd4))))))))))))))))));""",
+     """        piVar6 = (int *)(slots_54000 + 0x20);"""),
+    ("""        piVar4 = (int *)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)&stack0xfffffbd4))))))))))))))))));""",
+     """        piVar4 = (int *)(slots_54000 + 0x20);"""),
+    ("""  void *stack0xfffffbd4;""",
+     """  void *stack0xfffffbd4;
+  /* LP64: x86 frame-anchor scratch; the translation buffer and arg
+   * slots address [-0x18, +0x410) around the anchor (0x400 buffer at
+   * +10 words).  A real 0x480 arena replaces both 8-byte slots. */
+  char slots_54000[0x480];"""),
+    # FUN_00454000 tail: the Written-total/this-call/chunk reads address
+    # x86 frame slots (READ of 0 at 35450); rewritten per the assembly.
+    ("""            piVar9[-1] = piVar9[-1] + piVar9[2];""",
+     """            piVar9[-1] = piVar9[-1] + piVar9[-2];"""),
+    ("""LAB_00454125:
+          iVar10 = *piVar9;
+          piVar6 = piVar9 + -5;
+        }
+      }
+      if (*(int *)((long)(uintptr_t)piVar6 + 0x10) != 0) {
+        return *(int *)((long)(uintptr_t)piVar6 + 0x10) - *(int *)((long)(uintptr_t)piVar6 + 0x20);
+      }
+      iVar3 = *(int *)((long)(uintptr_t)piVar6 + 0x18);
+      if (iVar3 == 0) {
+        if (((*(byte *)(iVar10 + 4 + **(int **)((long)(uintptr_t)piVar6 + 0x24)) & 0x40) != 0) && (*param_2 == '\x1a')) {""",
+     """LAB_00454125:
+          /* LP64: *piVar9 and the piVar6-relative reads below address x86
+           * frame slots that hold nothing in the port (observed: READ of 0
+           * at 35450).  Per the assembly: iVar10 reloads from its home, the
+           * +0x10/+0x18 reads are the Written-total/this-call slots
+           * (piVar9[-1]/[-2], both written on this path), the +0x20
+           * subtrahend is the lpOverlapped NULL push (always 0), and the
+           * +0x24 double-deref is the chunk pointer. */
+          iVar10 = (param_1 & 0x1f) * 8;
+          piVar6 = piVar9 + -5;
+        }
+      }
+      if (piVar9[-1] != 0) {
+        return piVar9[-1];
+      }
+      iVar3 = piVar9[-2];
+      if (iVar3 == 0) {
+        if (((*(byte *)(iVar10 + 4 + (long)(uintptr_t)(&DAT_009ca9e0)[0]) & 0x40) != 0) && (*param_2 == '\x1a')) {"""),
+    ("""      *(int *)((long)(uintptr_t)piVar6 + -4) = iVar3;
+      *(undefined4 *)((long)(uintptr_t)piVar6 + -8) = 0x454161;
+      ((long (*)())FUN_00452de0)();
+      return -1;""",
+     """      /* LP64: direct call; the slot-staged arg is callee-invisible. */
+      FUN_00452de0((uint)iVar3);
+      return -1;"""),
+    # ogl_init: DirectDrawCreate is a ddraw import thunk (0x44fc18);
+    # the zero-arg call passed garbage dd (SEGV in the shim).  Direct
+    # 3-arg call with assembly-verified order (outer/dd/guid).
+    ("""  int iVar4;
+  HICON pHVar5;
+  HWND pHVar6;""",
+     """  int iVar4;
+  void *ddguid;
+  HICON pHVar5;
+  HWND pHVar6;"""),
+    ("""  if ((DAT_009ca824 < 0) || (2 < DAT_009ca824)) {
+    *(undefined4 *)(puVar14 + -4) = 0;
+    *(int ***)(puVar14 + -8) = (int **)(&DAT_004b1ac4);
+    *(undefined **)(puVar14 + -0xc) = (undefined *)(&DAT_007c5e70 + DAT_009ca824 * 0x850);
+  }
+  else {
+    *(undefined4 *)(puVar14 + -4) = 0;
+    *(int ***)(puVar14 + -8) = (int **)(&DAT_004b1ac4);
+    *(undefined4 *)(puVar14 + -0xc) = 0;
+  }
+  *(undefined4 *)(puVar14 + -0x10) = 0x40e90f;
+  iVar4 = ((long (*)())DirectDrawCreate)();""",
+     """/* LP64: the slot-staged args are callee-invisible (the zero-arg call
+   * passed garbage dd and faulted in the shim).  Per the assembly the
+   * pushes are outer/dd/guid; dd is the image cell, outer is NULL, and the
+   * guid is a byte offset into the 0x850-strided table (the decompile's
+   * data_u32* scaling would land 4x too far). */
+  if ((DAT_009ca824 < 0) || (2 < DAT_009ca824)) {
+    ddguid = (void *)((char *)&DAT_007c5e70 + (long)(uintptr_t)DAT_009ca824 * 0x850);
+  }
+  else {
+    ddguid = NULL;
+  }
+  iVar4 = DirectDrawCreate(ddguid,(void **)&DAT_004b1ac4,NULL);"""),
+    # FUN_0040dc80: dropped HWND-cell arg (assembly 0x40613b pushes
+    # 0x4b1cec; ebx=[esp+0x14] is the param, esi=[ebx] the window).
+    ("""void FUN_0040dc80(void) {""",
+     """/* LP64: takes the HWND cell (assembly 0x40613b pushes 0x4b1cec);
+ * ebx=[esp+0x14] is the param, esi=[ebx] the window (the decompile's
+ * +0x14 is the param-fetch address misattributed). */
+void FUN_0040dc80(HWND *param_1) {"""),
+    ("""  ppiVar7 = (int **)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)&stack0xfffffff0))))))))))))))))));""",
+     """  ppiVar7 = (int **)param_1;"""),
+    ("""piVar1 = *(int **)((long)(uintptr_t)ppiVar7 + 0x14);
+  iVar2 = *piVar1;""",
+     """  piVar1 = (int *)param_1;
+  iVar2 = *piVar1;"""),
+    # FUN_0041ddc0: two zero-arg calls drop pushed args (assembly
+    # 0x41ddc1 pushes 0x553320, 0x41ddd8 pushes DAT_004abf90).
+    ("""  piStack_8 = (int *)&DAT_00553320;
+  ((long (*)())FUN_00401330)();""",
+     """  piStack_8 = (int *)&DAT_00553320;
+  /* LP64: the decompile drops the argument (assembly pushes 0x553320). */
+  FUN_00401330((undefined4 *)&DAT_00553320);"""),
+    ("""  if (DAT_004abf90 != (int *)0xffffffff) {
+    piStack_8 = DAT_004abf90;
+    ((long (*)())FUN_00451230)();""",
+     """  if (DAT_004abf90 != (int *)0xffffffff) {
+    piStack_8 = DAT_004abf90;
+    /* LP64: assembly pushes DAT_004abf90 (a 4-byte image value). */
+    FUN_00451230((uint)(uintptr_t)DAT_004abf90);"""),
     # FUN_0040e050/FUN_0040e790: the GL import table at 0x468750 is 8-byte
     # entries (dest u32, name u32); the decompile read it as 16-byte
     # (ptr,ptr) pairs.  Rewrite the loop body to stride 8 via u32 reads.
@@ -889,6 +1276,9 @@ HAND_FIXES = [
       }"""),
     # (current form: an earlier pass left the uintptr-tail read, which
     # dereferences NULL on the first arena.  Bring it to the direct link.)
+    # (current form: an earlier pass left the image-tail read, which
+    # dereferences NULL on the first arena.  The sentinel now lives in
+    # bblit_arena_sentinel[] (see gen_headers.py); link there directly.)
     ("""      {
         undefined **oldtail = (undefined **)(uintptr_t)*(data_u32 *)0x4ae8e4ul;
         *ppuVar8 = (undefined *)&PTR_LOOP_004ae8e0;
@@ -896,13 +1286,30 @@ HAND_FIXES = [
         *(data_u32 *)((char *)oldtail + 0) = (data_u32)(uintptr_t)ppuVar8;
         *(data_u32 *)0x4ae8e4ul = (data_u32)(uintptr_t)ppuVar8;
       } /* LP64 tail-slot fix */""",
-     """      /* First arena: the image sentinel is self-linked (both slots
-       * hold 0x4ae8e0), so link ppuVar8 as its only element directly. */
+     """      /* First arena: the sentinel is self-linked, so link ppuVar8
+       * as its only element directly. */
+      {
+        *ppuVar8 = (undefined *)&PTR_LOOP_004ae8e0;
+        ppuVar8[1] = (undefined *)&PTR_LOOP_004ae8e0;
+        bblit_arena_sentinel[0] = (void *)ppuVar8;
+        bblit_arena_sentinel[1] = (void *)ppuVar8;
+      } /* LP64 tail-slot fix */"""),
+    # (older rewrite form: an earlier pass left the direct image-slot
+    # link below.  The sentinel now lives in bblit_arena_sentinel[].)
+    ("""      /* First arena: the image sentinel is self-linked (both slots * hold 0x4ae8e0), so link ppuVar8 as its only element directly. */
       {
         *ppuVar8 = (undefined *)&PTR_LOOP_004ae8e0;
         ppuVar8[1] = (undefined *)&PTR_LOOP_004ae8e0;
         *(data_u32 *)0x4ae8e0ul = (data_u32)(uintptr_t)ppuVar8;
         *(data_u32 *)0x4ae8e4ul = (data_u32)(uintptr_t)ppuVar8;
+      } /* LP64 tail-slot fix */""",
+     """      /* First arena: the sentinel is self-linked, so link ppuVar8
+       * as its only element directly. */
+      {
+        *ppuVar8 = (undefined *)&PTR_LOOP_004ae8e0;
+        ppuVar8[1] = (undefined *)&PTR_LOOP_004ae8e0;
+        bblit_arena_sentinel[0] = (void *)ppuVar8;
+        bblit_arena_sentinel[1] = (void *)ppuVar8;
       } /* LP64 tail-slot fix */"""),
     # FUN_004520e0: table pairs are unchanged (4+4 bytes from +48), so the
     # growth cursor (first page past the 64 KiB initial commit) is block
@@ -979,18 +1386,20 @@ HAND_FIXES = [
     ("  PTR_LOOP_004b0900 = (data_u32 *)((undefined *)ppuVar7);",
      "  *(data_u32 *)0x4b0900ul = (data_u32)(uintptr_t)ppuVar7;"),
     # ... and reads likewise.
-    # FUN_00452680's first param is a page *address* carried in an int*:
-    # the caller's iVar8 is long, so pass the full address through byte*
-    # (the body uses it only as a byte cursor; the int arithmetic in the
-    # return expression is address-shaped and stays).
+    # FUN_00452680's first param is a page *address* in an int*: the arena
+    # pages hold 32-bit values, so int* is the right type.  The caller's
+    # iVar8 is long (a page address can exceed 32-bit int range in the
+    # computation even though reserves land below 2 GiB), so pass the full
+    # address without narrowing.  (An earlier attempt widened the callee to
+    # byte*, which broke the body's int-pair reads; reverted.)
     # (Header prototype regenerates from the definition via fix_loop.)
-    ("int FUN_00452680(long param_1b,uint param_2,uint param_3) {\n  int *param_1 = (int *)param_1b;",
-     "int FUN_00452680(byte *param_1b,uint param_2,uint param_3) {\n  int *param_1 = (int *)(uintptr_t)param_1b;"),
-    # ... and its two call sites stop truncating the page base to long.
-    ("          piVar2 = (int *)FUN_00452680((long)(iVar8),*piVar10,param_1);",
-     "          piVar2 = (int *)FUN_00452680((byte *)(uintptr_t)(unsigned long)(iVar8),*piVar10,param_1);"),
-    ("          piVar3 = (int *)FUN_00452680((long)(iVar8),*piVar10,param_1);",
-     "          piVar3 = (int *)FUN_00452680((byte *)(uintptr_t)(unsigned long)(iVar8),*piVar10,param_1);"),
+    ("int FUN_00452680(byte *param_1,uint param_2,uint param_3) {",
+     "int FUN_00452680(int *param_1,uint param_2,uint param_3) {"),
+    # ... and its two call sites pass the full long page base.
+    ("          piVar2 = (int *)FUN_00452680((byte *)(uintptr_t)(unsigned long)(iVar8),*piVar10,param_1);",
+     "          piVar2 = (int *)FUN_00452680((int *)(uintptr_t)(unsigned long)(iVar8),*piVar10,param_1);"),
+    ("          piVar3 = (int *)FUN_00452680((byte *)(uintptr_t)(unsigned long)(iVar8),*piVar10,param_1);",
+     "          piVar3 = (int *)FUN_00452680((int *)(uintptr_t)(unsigned long)(iVar8),*piVar10,param_1);"),
     ("  piVar4 = (int *)PTR_LOOP_004b0900;",
      "  piVar4 = (int *)(uintptr_t)*(data_u32 *)0x4b0900ul;"),
     ("  } while (piVar4 != (int *)PTR_LOOP_004b0900);",
@@ -1005,6 +1414,28 @@ HAND_FIXES = [
     # shadow so the rest of the body is untouched.
     ("  undefined **ppuVar7;\n  int iVar8;\n  int iVar9;",
      "  undefined **ppuVar7;\n  long iVar8;\n  int iVar9;"),
+    # FUN_00452250 unlink: with 8-byte entries the prev field is at
+    # +8, not +4 (the old offset wrote the link into the entry padding
+    # and corrupted the list).
+    ("    *(undefined **)(*param_1 + 4) = param_1[1];",
+     "    *(undefined **)(*param_1 + 8) = param_1[1];"),
+    # FUN_004530b0: outgoing-arg slots addressed off the x86 frame anchor
+    # (puVar7/puVar6 + negative offsets) land outside any gcc local and
+    # smash the stack (observed: ASan underflow at -4, canary abort later
+    # in FUN_00453e60).  Pin them in a real 64-byte arena; anchor +0x10
+    # covers [-0x10, +0x30), every offset the function uses (-0xc min,
+    # +0x10 max).
+    ("  void *stack0xffffffa4;",
+     "  /* LP64: x86 frame anchor; real slot arena below. */\n  char slots_530b0[128];"),
+    ("&stack0xffffffa4",
+     "(slots_530b0 + 0x40)"),
+    # (follow-up: puVar7 drifts down several bytes per loop iteration via
+    # puVar7 = puVar6, so the arena needs headroom below the anchor too;
+    # 128 bytes at +0x40 covers [anchor-0x40, anchor+0x40).)
+    ("  char slots_530b0[64];",
+     "  char slots_530b0[128];"),
+    ("(slots_530b0 + 0x10)",
+     "(slots_530b0 + 0x40)"),
     # FUN_00452440: growth-path page formula uses the LP64 header size.
     ("  piVar10 = (int *)(ppuVar7[4] + ((long)(uintptr_t)piVar4 + (-0x18 - (long)(uintptr_t)ppuVar7) >> 3) * 0x1000);",
      "  piVar10 = (int *)((char *)ppuVar7[4] + ((long)(uintptr_t)piVar4 + (-0x30 - (long)(uintptr_t)ppuVar7) >> 3) * 0x1000);"),
@@ -1013,9 +1444,13 @@ HAND_FIXES = [
     # PTR_LOOP_004ae8e4 must go through the 4-byte view (see the 520e0
     # insert above for why the slot stays 4 bytes).
     ("  puVar8 = (undefined *)(PTR_LOOP_004ae8e4);",
-     "  puVar8 = (undefined *)(uintptr_t)*(data_u32 *)0x4ae8e4ul;"),
+     "  puVar8 = (undefined *)bblit_arena_sentinel[1];"),
+    ("  puVar8 = (undefined *)(uintptr_t)*(data_u32 *)0x4ae8e4ul;",
+     "  puVar8 = (undefined *)bblit_arena_sentinel[1];"),
     ("    if ((puVar9 == PTR_LOOP_004ae8e4) || (puVar8 = puVar9, *(int *)(puVar6 + 0x14) < 1)) {",
      "    if ((puVar9 == (undefined *)(uintptr_t)*(data_u32 *)0x4ae8e4ul) || (puVar8 = puVar9, *(int *)(puVar6 + 0x14) < 1)) {"),
+    ("    if ((puVar9 == (undefined *)(uintptr_t)*(data_u32 *)0x4ae8e4ul) || (puVar8 = puVar9, *(int *)(puVar6 + 0x14) < 1)) {",
+     "    if ((puVar9 == (undefined *)bblit_arena_sentinel[1]) || (puVar8 = puVar9, *(int *)(puVar6 + 0x14) < 1)) {"),
     # FUN_004520e0: the tag-table fill writes pairs, not whole 8-byte
     # entries: `*ppuVar5 = ...; ppuVar5[1] = ...` stores a pointer then a
     # 4-byte flag at entry+8 semantics.  On LP64 ppuVar5 is undefined**
@@ -1040,6 +1475,20 @@ HAND_FIXES = [
         *(undefined4 *)((char *)ppuVar5 + 4) = 0xf1;
         ppuVar5 = (undefined **)((char *)ppuVar5 + 8);
       } while (iVar4 < 0x400);"""),
+    # FUN_004520e0 success: point the list head at the new arena.  The
+    # original never needed this (its first arena WAS the image sentinel,
+    # which the head already pointed at), but heap arenas must be linked
+    # explicitly.  0x4b0900 stays a 4-byte slot (widening would eat the
+    # sub-allocator limit in 0x4b0904); reserve blocks are <2GiB so the
+    # value round-trips exactly.  The grow path in FUN_00452440 sets the
+    # same head right after its own 520e0 call, so sharing is harmless.
+    ("""        } while (puVar2 < ppuVar8[4] + 0x10000);
+      }
+      return ppuVar8;""",
+     """        } while (puVar2 < ppuVar8[4] + 0x10000);
+      }
+      *(data_u32 *)0x4b0900ul = (data_u32)(uintptr_t)ppuVar8;
+      return ppuVar8;"""),
     # FUN_00452440: the fresh-block table count sits at table start (+48).
     ("      *(uint *)(puVar5 + 0x18) = *(int *)(puVar5 + 0x18) - (param_1 & 0xff);",
      "      *(uint *)(puVar5 + 0x30) = *(int *)(puVar5 + 0x30) - (param_1 & 0xff);"),
@@ -1063,6 +1512,14 @@ HAND_FIXES = [
      "        puVar3 = (undefined4 *)((long (*)())FUN_00452440)((undefined4)(uVar6 >> 4));"),
     ("    iVar1 = ((long (*)())FUN_00452080)();",
      "    iVar1 = ((long (*)())FUN_00452080)((undefined4)uVar6);"),
+    # sysinfo_cpu_detect PIT fallback: uVar16 is min over 10 latched-TSC
+    # reads; if a latch lands on TSC[23:16,7:0]==0 the min is 0 and the
+    # 0x1fffe/uVar16 divide faults (measured: SIGFPE in sysinfo_cpu_detect).
+    # Real hardware always advances between latch and read; the port's
+    # in()/out() emulation snapshots at out(), so 0 is possible (rare).
+    ("""    uVar16 = (uVar16 * 100000) / 0x1d216;""",
+     """    if (uVar16 == 0) uVar16 = 1;
+    uVar16 = (uVar16 * 100000) / 0x1d216;"""),
 ]
 
 def ptr_cast_pass(lines):

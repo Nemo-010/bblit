@@ -42556,13 +42556,9 @@ static const struct { unsigned from; void *to; } bblit_thunks[] = {
 { 0x0044fe80, (void *)&FUN_0044fe80 },
 { 0x004501d0, (void *)&FUN_004501d0 },
 { 0x00450270, (void *)&FUN_00450270 },
-{ 0x00450420, (void *)&FUN_00450420 },
-{ 0x00450490, (void *)&FUN_00450490 },
 { 0x00450500, (void *)&FUN_00450500 },
-{ 0x00450580, (void *)&FUN_00450580 },
 { 0x004505c0, (void *)&FUN_004505c0 },
 { 0x00450710, (void *)&FUN_00450710 },
-{ 0x00450740, (void *)&FUN_00450740 },
 { 0x00450760, (void *)&FUN_00450760 },
 { 0x00450800, (void *)&FUN_00450800 },
 { 0x00450810, (void *)&FUN_00450810 },
@@ -42759,7 +42755,6 @@ static const unsigned bblit_ptr_slots[] = {
   0x004ac114,
   0x004ac118,
   0x004ac30c,
-  0x004ae8e0,
   0x004b0908,
   0x004b090c,
   0x004b0910,
@@ -42796,6 +42791,7 @@ static const unsigned bblit_ptr_slots[] = {
   0x004b1aa0,
   0x004b1aa4,
   0x004b1ab4,
+  0x004b1ac4,
   0x004b1c4c,
   0x004b1c74,
   0x004b1c80,
@@ -43092,6 +43088,18 @@ static const unsigned bblit_ptr_slots[] = {
   0x009cbb08,
 };
 
+/* VC6 sub-allocator arena-list sentinel (replaces the image slots
+ * 0x4ae8e0/0x4ae8e4, which cannot be widened in place).  next+0 and
+ * prev+8 self-link; the rest stays zero so the arena walks in
+ * FUN_004522b0/452380/452440 skip the sentinel. */
+void *bblit_arena_sentinel[6] = {0};
+
+/* LP64 side-table cells for conflict slots (see above).  Cell i
+ * mirrors the image dword for its address, zero-extended; reads
+ * and writes go through the cell at full 64-bit width so neither
+ * the neighbour nor a high function address is ever clobbered. */
+data_u32 *bblit_slot_cells[28] = {0};
+
 void bblit_port_init(void);
 void bblit_port_init(void)
 {
@@ -43112,6 +43120,39 @@ void bblit_port_init(void)
     }
     mprotect((void *)BBLIT_BLOB_BASE, BBLIT_CODE_END - BBLIT_BLOB_BASE,
              PROT_READ | PROT_EXEC);
+    /* side-table cells snapshot the pristine image dwords FIRST:
+     * a skipped slot neighboring a widened one (e.g. 0x4ac310
+     * next to the widened 0x4ac30c) has its image bytes clobbered
+     * by the widening write (measured: the Cyrix needle cell
+     * snapshotted NULL). */
+    bblit_slot_cells[0] = (data_u32 *)(uintptr_t)*(volatile data_u32 *)0x0045f2a0ul;
+    bblit_slot_cells[1] = (data_u32 *)(uintptr_t)*(volatile data_u32 *)0x0045f344ul;
+    bblit_slot_cells[2] = (data_u32 *)(uintptr_t)*(volatile data_u32 *)0x0046773cul;
+    bblit_slot_cells[3] = (data_u32 *)(uintptr_t)*(volatile data_u32 *)0x0046aec0ul;
+    bblit_slot_cells[4] = (data_u32 *)(uintptr_t)*(volatile data_u32 *)0x004abf90ul;
+    bblit_slot_cells[5] = (data_u32 *)(uintptr_t)*(volatile data_u32 *)0x004ac020ul;
+    bblit_slot_cells[6] = (data_u32 *)(uintptr_t)*(volatile data_u32 *)0x004ac0a8ul;
+    bblit_slot_cells[7] = (data_u32 *)(uintptr_t)*(volatile data_u32 *)0x004ac0b8ul;
+    bblit_slot_cells[8] = (data_u32 *)(uintptr_t)*(volatile data_u32 *)0x004ac0c4ul;
+    bblit_slot_cells[9] = (data_u32 *)(uintptr_t)*(volatile data_u32 *)0x004ac0d8ul;
+    bblit_slot_cells[10] = (data_u32 *)(uintptr_t)*(volatile data_u32 *)0x004ac0e0ul;
+    bblit_slot_cells[11] = (data_u32 *)(uintptr_t)*(volatile data_u32 *)0x004ac0e8ul;
+    bblit_slot_cells[12] = (data_u32 *)(uintptr_t)*(volatile data_u32 *)0x004ac0f0ul;
+    bblit_slot_cells[13] = (data_u32 *)(uintptr_t)*(volatile data_u32 *)0x004ac11cul;
+    bblit_slot_cells[14] = (data_u32 *)(uintptr_t)*(volatile data_u32 *)0x004ac12cul;
+    bblit_slot_cells[15] = (data_u32 *)(uintptr_t)*(volatile data_u32 *)0x004ac310ul;
+    bblit_slot_cells[16] = (data_u32 *)(uintptr_t)*(volatile data_u32 *)0x004ac550ul;
+    bblit_slot_cells[17] = (data_u32 *)(uintptr_t)*(volatile data_u32 *)0x004ac6e0ul;
+    bblit_slot_cells[18] = (data_u32 *)(uintptr_t)*(volatile data_u32 *)0x004ad380ul;
+    bblit_slot_cells[19] = (data_u32 *)(uintptr_t)*(volatile data_u32 *)0x004ae098ul;
+    bblit_slot_cells[20] = (data_u32 *)(uintptr_t)*(volatile data_u32 *)0x004ae5fcul;
+    bblit_slot_cells[21] = (data_u32 *)(uintptr_t)*(volatile data_u32 *)0x004ae620ul;
+    bblit_slot_cells[22] = (data_u32 *)(uintptr_t)*(volatile data_u32 *)0x004b091cul;
+    bblit_slot_cells[23] = (data_u32 *)(uintptr_t)*(volatile data_u32 *)0x004b0a98ul;
+    bblit_slot_cells[24] = (data_u32 *)(uintptr_t)*(volatile data_u32 *)0x004b0ca8ul;
+    bblit_slot_cells[25] = (data_u32 *)(uintptr_t)*(volatile data_u32 *)0x004b0dfeul;
+    bblit_slot_cells[26] = (data_u32 *)(uintptr_t)*(volatile data_u32 *)0x004b0e50ul;
+    bblit_slot_cells[27] = (data_u32 *)(uintptr_t)*(volatile data_u32 *)0x004b10f8ul;
     /* Two phases: slots sit 4 bytes apart, so an in-place 8-byte
      * widening write clobbers the next slot's original value
      * (measured: 0x4ac30c's write zeroed 0x4ac310, whose needle
@@ -43126,4 +43167,6 @@ void bblit_port_init(void)
         *(void *volatile *)a =
             (void *)(uintptr_t)widen_snap[i];
     }
+    /* arena-list sentinel starts self-linked, like the image did. */
+    bblit_arena_sentinel[0] = bblit_arena_sentinel[1] = (void *)&bblit_arena_sentinel[0];
 }

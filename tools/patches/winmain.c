@@ -106,7 +106,11 @@ undefined4 winmain(HINSTANCE param_1,undefined4 param_2,undefined4 param_3,undef
     cVar1 = *pcVar17;
     pcVar17 = pcVar17 + (long)(int)((uint)bVar21 * -2 + 1);
   } while (cVar1 != '\0');
-  if (acStack_14e[(long)(int)(~uVar11)] != '\\') {
+  /* LP64: acStack_14e (2B at EBP-0x14e) packed exactly between local_250 and
+   * local_14c, arrays index upward, so acStack_14e[i] is local_14c[i-2]; the
+   * strlen loop above leaves ~uVar11 = len+1, i.e. this checks the last path
+   * char for a trailing backslash.  The arrays are separate gcc locals here. */
+  if (local_14c[(long)(int)(~uVar11) - 2] != '\\') {
     uVar11 = 0xffffffff;
     pcVar17 = &DAT_0045f370;
     do {
@@ -174,7 +178,9 @@ undefined4 winmain(HINSTANCE param_1,undefined4 param_2,undefined4 param_3,undef
     pcVar17 = pcVar17 + (long)(int)((uint)bVar21 * -2 + 1);
     pcVar19 = pcVar19 + (long)(int)((uint)bVar21 * -2 + 1);
   }
-  ((long (*)())FUN_00450760)();
+  /* LP64/assembly: the decompile drops the argument; the binary pushes
+   * local_14c (`lea eax,[ebp-0x148]; push eax` before `call 00450760`). */
+  FUN_00450760(local_14c);
   RegCloseKey(local_8);
   bVar2 = false;
   UVar8 = SetErrorMode(1);
@@ -472,7 +478,9 @@ LAB_004060fc:
   FUN_004474a0();
   *(HWND **)(puVar15 + -4) = (void **)(&DAT_004b1cec);
   *(undefined4 *)(puVar15 + -8) = 0x406145;
-  FUN_0040dc80();
+  /* LP64: assembly 0x40613b pushes 0x4b1cec (the HWND cell); the -4 slot
+   * staging is callee-invisible on LP64. */
+  FUN_0040dc80((HWND *)&DAT_004b1cec);
   *(undefined4 *)(puVar15 + -4) = 0x40614d;
   FUN_0040e1b0();
   return local_24;

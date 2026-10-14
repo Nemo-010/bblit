@@ -63,6 +63,43 @@ int main(int argc, char **argv)
     if (!crt_ok) __amsg_exit(0x1c);
     FUN_004530b0();
     FUN_00457600();
+    /* MSVC _ioinit equivalent for fds 0/1/2: one 32-record chunk of
+     * {osfhnd, osfile} records; free records read back -1.  Without it the
+     * first stdio flush reads _osfhnd[1] as INVALID_HANDLE_VALUE and dies
+     * in fwrite (observed: sysinfo flush, WriteFile h=0xffffffff).  Small
+     * handles route to stdio in the ReadFile/WriteFile shims.  An existing
+     * chunk (opened by the config phase) is kept, only 0/1/2 are seeded. */
+    {
+        static uintptr_t stdio_chunk[32 * 2];
+        static int stdio_chunk_done = 0;
+        data_u32 *chunk0 = (&DAT_009ca9e0)[0];
+        if (!chunk0) {
+            for (int i = 0; i < 32; i++) {
+                stdio_chunk[2 * i] = (uintptr_t)(int)-1;
+                stdio_chunk[2 * i + 1] = 0;
+            }
+            stdio_chunk_done = 1;
+            chunk0 = (data_u32 *)stdio_chunk;
+            (&DAT_009ca9e0)[0] = chunk0;
+        }
+        (void)stdio_chunk_done;
+        for (int fd = 0; fd < 3; fd++) {
+            ((uintptr_t *)chunk0)[2 * fd] = (uintptr_t)fd;
+            ((unsigned char *)chunk0)[fd * 8 + 4] = 1;
+        }
+    }
+    /* Print buffers for the two static FILE structs (&DAT_004ae668/688).
+     * FUN_00453f00 would HeapAlloc them, but a glibc heap address does not
+     * fit the struct's 32-bit cursor/buffer slots (observed: cursor
+     * truncated to 0x97274020, SEGV in FUN_00453d90).  .bss here is below
+     * 4 GiB (like vf_frame), so static buffers keep every downstream
+     * 4-byte int flow exact with no layout churn.  Pre-seeding the
+     * (&DAT_004b1e90) slots also skips the sub-allocator entirely. */
+    {
+        static unsigned char print_bufs[2][0x1000];
+        (&DAT_004b1e90)[0] = (data_u32)(uintptr_t)&print_bufs[0];
+        (&DAT_004b1e90)[1] = (data_u32)(uintptr_t)&print_bufs[1];
+    }
     /* WinMain(hInst=NULL-ish, hPrev=NULL, lpCmdLine=NULL, nShowCmd=SW_SHOW) */
     return (int)winmain(0, 0, 0, 1);
 }

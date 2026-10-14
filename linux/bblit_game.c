@@ -3593,7 +3593,11 @@ undefined4 winmain(HINSTANCE param_1,undefined4 param_2,undefined4 param_3,undef
     cVar1 = *pcVar17;
     pcVar17 = pcVar17 + (long)(int)((uint)bVar21 * -2 + 1);
   } while (cVar1 != '\0');
-  if (acStack_14e[(long)(int)(~uVar11)] != '\\') {
+  /* LP64: acStack_14e (2B at EBP-0x14e) packed exactly between local_250 and
+   * local_14c, arrays index upward, so acStack_14e[i] is local_14c[i-2]; the
+   * strlen loop above leaves ~uVar11 = len+1, i.e. this checks the last path
+   * char for a trailing backslash.  The arrays are separate gcc locals here. */
+  if (local_14c[(long)(int)(~uVar11) - 2] != '\\') {
     uVar11 = 0xffffffff;
     pcVar17 = &DAT_0045f370;
     do {
@@ -3661,7 +3665,9 @@ undefined4 winmain(HINSTANCE param_1,undefined4 param_2,undefined4 param_3,undef
     pcVar17 = pcVar17 + (long)(int)((uint)bVar21 * -2 + 1);
     pcVar19 = pcVar19 + (long)(int)((uint)bVar21 * -2 + 1);
   }
-  ((long (*)())FUN_00450760)();
+  /* LP64/assembly: the decompile drops the argument; the binary pushes
+   * local_14c (`lea eax,[ebp-0x148]; push eax` before `call 00450760`). */
+  FUN_00450760(local_14c);
   RegCloseKey(local_8);
   bVar2 = false;
   UVar8 = SetErrorMode(1);
@@ -3959,7 +3965,9 @@ LAB_004060fc:
   FUN_004474a0();
   *(HWND **)(puVar15 + -4) = (void **)(&DAT_004b1cec);
   *(undefined4 *)(puVar15 + -8) = 0x406145;
-  FUN_0040dc80();
+  /* LP64: assembly 0x40613b pushes 0x4b1cec (the HWND cell); the -4 slot
+   * staging is callee-invisible on LP64. */
+  FUN_0040dc80((HWND *)&DAT_004b1cec);
   *(undefined4 *)(puVar15 + -4) = 0x40614d;
   FUN_0040e1b0();
   return local_24;
@@ -7383,7 +7391,10 @@ void FUN_0040daf0(void) {
 }
 
 // ===== FUN_0040dc80 @ 0040dc80 =====
-void FUN_0040dc80(void) {
+/* LP64: takes the HWND cell (assembly 0x40613b pushes 0x4b1cec);
+ * ebx=[esp+0x14] is the param, esi=[ebx] the window (the decompile's
+ * +0x14 is the param-fetch address misattributed). */
+void FUN_0040dc80(HWND *param_1) {
   void *stack0xfffffff0;
   int *piVar1;
   int iVar2;
@@ -7394,14 +7405,14 @@ void FUN_0040dc80(void) {
   int **ppiVar7;
   int *piStack_14;
   
-  ppiVar7 = (int **)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)&stack0xfffffff0))))))))))))))))));
+  ppiVar7 = (int **)param_1;
   if (DAT_004b1ac4 != (int *)0x0) {
     ppiVar7 = &piStack_14;
     piStack_14 = DAT_004b1ac4;
     (**(code **)(*DAT_004b1ac4 + 8))();
     DAT_004b1ac4 = (int *)0x0;
   }
-  piVar1 = *(int **)((long)(uintptr_t)ppiVar7 + 0x14);
+  piVar1 = (int *)param_1;
   iVar2 = *piVar1;
   if (iVar2 != 0) {
     if (DAT_004ac094 == 2) {
@@ -7703,11 +7714,9 @@ undefined4 ogl_load_dll(void) {
     DAT_009ca724 = (uintptr_t)((HMODULE)0x0);
   }
   puVar5 = puVar4 + -4;
-  *(char **)(puVar4 + -4) = g_OPENGL_DLL;
-  *(undefined4 *)(puVar4 + -8) = 0x40e084;
-  DAT_009ca724 = (uintptr_t)(LoadLibraryA(*(LPCSTR *)(puVar4 + -4)));
+  /* LP64: puVar4-4 is a 4-byte x86 slot; the 8-byte pointer store there * underflows the gcc local (ASan WRITE size 8, ogl_load_dll:7706), so call * the shim directly.  The 0x40e0xx stores were x86 return markers. */
+  DAT_009ca724 = (uintptr_t)(LoadLibraryA(g_OPENGL_DLL));
   if (DAT_009ca724 == (HMODULE)0x0) {
-    *(undefined4 *)(puVar4 + -8) = 0x40e093;
     DVar1 = GetLastError();
   }
   else {
@@ -7791,6 +7800,7 @@ HWND ogl_init(void) {
   undefined4 uVar2;
   undefined4 *puVar3;
   int iVar4;
+  void *ddguid;
   HICON pHVar5;
   HWND pHVar6;
   HCURSOR pHVar7;
@@ -7885,18 +7895,14 @@ HWND ogl_init(void) {
     (*pcVar18)();
     DAT_004b1ac4 = (int *)0x0;
   }
+  /* LP64: the slot-staged args are callee-invisible (the zero-arg call * passed garbage dd and faulted in the shim).  Per the assembly the * pushes are outer/dd/guid; dd is the image cell, outer is NULL, and the * guid is a byte offset into the 0x850-strided table (the decompile's * data_u32* scaling would land 4x too far). */
   if ((DAT_009ca824 < 0) || (2 < DAT_009ca824)) {
-    *(undefined4 *)(puVar14 + -4) = 0;
-    *(int ***)(puVar14 + -8) = (int **)(&DAT_004b1ac4);
-    *(undefined **)(puVar14 + -0xc) = (undefined *)(&DAT_007c5e70 + DAT_009ca824 * 0x850);
+    ddguid = (void *)((char *)&DAT_007c5e70 + (long)(uintptr_t)DAT_009ca824 * 0x850);
   }
   else {
-    *(undefined4 *)(puVar14 + -4) = 0;
-    *(int ***)(puVar14 + -8) = (int **)(&DAT_004b1ac4);
-    *(undefined4 *)(puVar14 + -0xc) = 0;
+    ddguid = NULL;
   }
-  *(undefined4 *)(puVar14 + -0x10) = 0x40e90f;
-  iVar4 = ((long (*)())DirectDrawCreate)();
+  iVar4 = DirectDrawCreate(ddguid,(void **)&DAT_004b1ac4,NULL);
   if (iVar4 == 0) {
     uVar2 = *(undefined4 *)(puVar14 + 0x14c);
     *(undefined4 *)(puVar14 + -0x10) = uVar2;
@@ -8014,18 +8020,15 @@ HWND ogl_init(void) {
           puVar16 = puVar12;
           if (DAT_009ca724 != (HMODULE)0x0) {
             puVar16 = puVar12 + -4;
-            *(HMODULE *)(puVar12 + -4) = (HMODULE)(uintptr_t)(DAT_009ca724);
-            *(undefined4 *)(puVar12 + -8) = 0x40eb09;
-            FreeLibrary(*(HMODULE *)(puVar12 + -4));
+            /* LP64: direct call; the puVar12-4 slot store overflows (see above). */
+            FreeLibrary((void *)(uintptr_t)(DAT_009ca724));
             DAT_009ca724 = (uintptr_t)((HMODULE)0x0);
           }
           puVar13 = puVar16 + -4;
-          *(char **)(puVar16 + -4) = g_OPENGL_DLL;
-          *(undefined4 *)(puVar16 + -8) = 0x40eb1a;
-          DAT_009ca724 = (uintptr_t)(LoadLibraryA(*(LPCSTR *)(puVar16 + -4)));
+          /* LP64: direct call; the puVar16-4 slot store overflows (see above). */
+          DAT_009ca724 = (uintptr_t)(LoadLibraryA(g_OPENGL_DLL));
           pcVar18 = (long int (**)())(GetLastError_exref);
           if (DAT_009ca724 == (HMODULE)0x0) {
-            *(undefined4 *)(puVar16 + -8) = 0x40eb2b;
             DVar8 = GetLastError();
           }
           else {
@@ -11049,10 +11052,12 @@ void FUN_0041ddc0(void) {
   int *piStack_8;
   
   piStack_8 = (int *)&DAT_00553320;
-  ((long (*)())FUN_00401330)();
+  /* LP64: the decompile drops the argument (assembly pushes 0x553320). */
+  FUN_00401330((undefined4 *)&DAT_00553320);
   if (DAT_004abf90 != (int *)0xffffffff) {
     piStack_8 = DAT_004abf90;
-    ((long (*)())FUN_00451230)();
+    /* LP64: assembly pushes DAT_004abf90 (a 4-byte image value). */
+    FUN_00451230((uint)(uintptr_t)DAT_004abf90);
   }
   ppiVar1 = (int **)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)&stack0xfffffffc))))))))))))))))));
   if (DAT_004b1c74 != (int *)0x0) {
@@ -18488,68 +18493,19 @@ LSTATUS sysinfo_cpu_detect(void) {
   if (DAT_004b1de8 != 0) {
     return SVar7;
   }
+  /* Hand port from the assembly (objdump .text @0042a1c6-0042a402): the * pushfw dances use 16-bit pushes (`66 9c`), so the bit-21/bit-18 toggles * are truncated and can never stick; tracing the stack slots shows dance 1 * (CPUID bit) always yields 0 and dance 2 (AC bit) always yields 1, and the * DIV test yields 1 on 286+.  The CPUID branch is dead code on every real * CPU: the game always takes the vendor-table path below (FPU always * present, so DAT_004b1dd4 = 1).  The decompile instead models EFLAGS in * x86 frame slots off puVar12, whose stores underflow the gcc locals * (ASan WRITE size 2, sysinfo_cpu_detect:18495).  Replaced with the * silicon-observable sequence; the 1dd4/1de0/3ff0/strstr tail below is * unchanged and matches the assembly at 0042a402-0042a44f. */
+  _DAT_004b3fe0 = (data_u32 *)(uintptr_t)0;
+  _DAT_004b3fe4 = (data_u32 *)(uintptr_t)0;
+  _DAT_004b3fe8 = (data_u32 *)(uintptr_t)0;
   _DAT_004b3fec = 0;
-  *(ushort *)((long)(uintptr_t)puVar12 + -2) = (ushort)(in_NT & 1) * 0x4000 | (ushort)(bVar3 & 1) * 0x400 | (ushort)(in_IF & 1) * 0x200 | (ushort)(in_TF & 1) * 0x100 | 0x40 | (ushort)(in_AF & 1) * 0x10 | 4;
-  uVar16 = *(uint *)((long)(uintptr_t)puVar12 + -2);
-  *(uint *)((long)(uintptr_t)puVar12 + -2) = uVar16 ^ 0x200000;
-  uVar22 = *(ushort *)((long)(uintptr_t)puVar12 + -2);
-  bVar21 = (uVar22 & 0x4000) != 0;
-  bVar20 = (uVar22 & 0x400) != 0;
-  bVar19 = (uVar22 & 0x200) != 0;
-  bVar18 = (uVar22 & 0x100) != 0;
-  bVar17 = (uVar22 & 0x10) != 0;
-  *(ushort *)((long)(uintptr_t)puVar12 + -2) = (ushort)bVar21 * 0x4000 | (ushort)((uVar22 & 0x800) != 0) * 0x800 | (ushort)bVar20 * 0x400 | (ushort)bVar19 * 0x200 | (ushort)bVar18 * 0x100 | (ushort)((uVar22 & 0x80) != 0) * 0x80 | (ushort)((uVar22 & 0x40) != 0) * 0x40 | (ushort)bVar17 * 0x10 | (ushort)((uVar22 & 4) != 0) * 4 | (ushort)((uVar22 & 1) != 0);
-  local_8 = (uint)(*(uint *)((long)(uintptr_t)puVar12 + -2) != uVar16);
-  if (local_8 == 0) {
-    _DAT_004b3fe0 = (data_u32 *)(uintptr_t)(*(int *)PTR_s_NoVendorName_004ac30c);
-    _DAT_004b3fe4 = (data_u32 *)(uintptr_t)(*(uint *)(PTR_s_NoVendorName_004ac30c + 4));
-    _DAT_004b3fe8 = (data_u32 *)(uintptr_t)(*(int *)(PTR_s_NoVendorName_004ac30c + 8));
-    DAT_004b1dd4 = (data_u32 *)(uintptr_t)(1);
-    *(ushort *)puVar12 = (ushort)bVar21 * 0x4000 | (ushort)bVar20 * 0x400 | (ushort)bVar19 * 0x200 | (ushort)bVar18 * 0x100 | 0x40 | (ushort)bVar17 * 0x10 | 4;
-    uVar16 = *puVar12;
-    *puVar12 = uVar16 ^ 0x40000;
-    uVar2 = *puVar12;
-    *(ushort *)puVar12 = (ushort)((uVar2 & 0x4000) != 0) * 0x4000 | (ushort)((uVar2 & 0x800) != 0) * 0x800 | (ushort)((uVar2 & 0x400) != 0) * 0x400 | (ushort)((uVar2 & 0x200) != 0) * 0x200 | (ushort)((uVar2 & 0x100) != 0) * 0x100 | (ushort)((uVar2 & 0x80) != 0) * 0x80 | (ushort)((uVar2 & 0x40) != 0) * 0x40 | (ushort)((uVar2 & 0x10) != 0) * 0x10 | (ushort)((uVar2 & 4) != 0) * 4 | (ushort)((uVar2 & 1) != 0);
-    uVar2 = *puVar12;
-    *puVar12 = uVar16;
-    if (uVar2 == uVar16) {
-      *(undefined4 *)((long)(uintptr_t)puVar12 + -2) = in_CR0;
-      local_8 = 1;
-      DAT_004b3ff0 = (data_u32 *)(uintptr_t)(3);
-      DAT_004b3ff4 = 0;
-    }
-    else {
-      local_8 = 1;
-      _DAT_004b3fe0 = (data_u32 *)(uintptr_t)(*(int *)PTR_s_CyrixInstead_004ac310);
-      _DAT_004b3fe4 = (data_u32 *)(uintptr_t)(*(uint *)(PTR_s_CyrixInstead_004ac310 + 4));
-      _DAT_004b3fe8 = (data_u32 *)(uintptr_t)(*(int *)(PTR_s_CyrixInstead_004ac310 + 8));
-      ((ushort *)((long)(uintptr_t)puVar12 + -2))[0] = 0xa3ec;
-      ((ushort *)((long)(uintptr_t)puVar12 + -2))[1] = 0x42;
-      FUN_00429f90();
-    }
-  }
-  else {
-    DAT_004b1ddc = 1;
-    piVar1 = (int *)cpuid_basic_info(0);
-    DAT_004b3fc8 = *piVar1;
-    _DAT_004b3fe0 = (data_u32 *)(uintptr_t)(piVar1[1]);
-    _DAT_004b3fe4 = (data_u32 *)(uintptr_t)(piVar1[2]);
-    _DAT_004b3fe8 = (data_u32 *)(uintptr_t)(piVar1[3]);
-    DAT_004b3fcc = (uintptr_t)(_DAT_004b3fe0);
-    DAT_004b3fd0 = (uintptr_t)(_DAT_004b3fe8);
-    DAT_004b3fd4 = (uintptr_t)(_DAT_004b3fe4);
-    if (0 < DAT_004b3fc8) {
-      piVar1 = (int *)cpuid_Version_info(1);
-      DAT_004b3fc8 = *piVar1;
-      DAT_004b3fcc = piVar1[1];
-      DAT_004b3fd4 = piVar1[2];
-      DAT_004b3fd0 = piVar1[3];
-      DAT_004b3ff4 = (data_u32 *)(uintptr_t)(DAT_004b3fc8 >> 4 & 0xf);
-      DAT_004b3ff0 = (data_u32 *)(uintptr_t)(DAT_004b3fc8 >> 8 & 0xf);
-      DAT_004b1dd4 = (data_u32 *)(uintptr_t)(DAT_004b3fd4 & 1);
-      DAT_004b1dd8 = (data_u32 *)(uintptr_t)(DAT_004b3fd4 >> 0x17 & 1);
-    }
-  }
+  _DAT_004b3fe0 = (data_u32 *)(uintptr_t)(*(int *)PTR_s_NoVendorName_004ac30c);
+  _DAT_004b3fe4 = (data_u32 *)(uintptr_t)(*(uint *)(PTR_s_NoVendorName_004ac30c + 4));
+  _DAT_004b3fe8 = (data_u32 *)(uintptr_t)(*(int *)(PTR_s_NoVendorName_004ac30c + 8));
+  DAT_004b1dd4 = (data_u32 *)(uintptr_t)(1);
+  _DAT_004b3fe0 = (data_u32 *)(uintptr_t)(*(int *)PTR_s_CyrixInstead_004ac310);
+  _DAT_004b3fe4 = (data_u32 *)(uintptr_t)(*(uint *)(PTR_s_CyrixInstead_004ac310 + 4));
+  _DAT_004b3fe8 = (data_u32 *)(uintptr_t)(*(int *)(PTR_s_CyrixInstead_004ac310 + 8));
+  FUN_00429f90();
   if (DAT_004b1dd4 != 0) {
     _DAT_004b1de0 = 0;
   }
@@ -18628,22 +18584,12 @@ LSTATUS sysinfo_cpu_detect(void) {
   }
   else {
     uVar16 = 0xffffffff;
-    ((ushort *)((long)(uintptr_t)puVar12 + -2))[0] = 0xa52e;
-    ((ushort *)((long)(uintptr_t)puVar12 + -2))[1] = 0x42;
+    /* LP64: the 0xa52e/0xa53a/0xa54f stores are x86 return markers staged * through 4-byte frame slots; on LP64 they underflow the gcc locals * (ASan WRITE size 2, sysinfo_cpu_detect:18595).  The assembly at * 0042a525 passes the thread handle and priority directly. */
     pvVar11 = GetCurrentThread();
-    puVar14 = (ushort *)((long)(uintptr_t)puVar12 + -2);
-    *(HANDLE *)((long)(uintptr_t)puVar12 + -2) = pvVar11;
-    ((ushort *)((long)(uintptr_t)puVar12 + -6))[0] = 0xa53a;
-    ((ushort *)((long)(uintptr_t)puVar12 + -6))[1] = 0x42;
     local_10 = pvVar11;
-    iVar15 = GetThreadPriority(*(HANDLE *)((long)(uintptr_t)puVar12 + -2));
+    iVar15 = GetThreadPriority(pvVar11);
     if (iVar15 != 0x7fffffff) {
-      *(int *)((long)(uintptr_t)puVar12 + -6) = iVar15 + 1;
-      puVar14 = (ushort *)((long)(uintptr_t)puVar12 + -10);
-      *(HANDLE *)((long)(uintptr_t)puVar12 + -10) = pvVar11;
-      ((ushort *)((long)(uintptr_t)puVar12 + -0xe))[0] = 0xa54f;
-      ((ushort *)((long)(uintptr_t)puVar12 + -0xe))[1] = 0x42;
-      SetThreadPriority(*(HANDLE *)((long)(uintptr_t)puVar12 + -10),*(int *)((long)(uintptr_t)puVar12 + -6));
+      SetThreadPriority(pvVar11,iVar15 + 1);
     }
     local_8 = 10;
     do {
@@ -18665,11 +18611,10 @@ LSTATUS sysinfo_cpu_detect(void) {
       local_8 = local_8 - 1;
     } while (local_8 != 0);
     if (iVar15 != 0x7fffffff) {
-      *(int *)((long)(uintptr_t)puVar14 + -4) = iVar15;
-      *(HANDLE *)((long)(uintptr_t)puVar14 + -8) = local_10;
-      *(undefined4 *)((long)(uintptr_t)puVar14 + -0xc) = 0x42a5b0;
-      SetThreadPriority(*(HANDLE *)((long)(uintptr_t)puVar14 + -8),*(int *)((long)(uintptr_t)puVar14 + -4));
+      /* LP64: direct call; the puVar14-slot stores overflow (see above). */
+      SetThreadPriority(local_10,iVar15);
     }
+    if (uVar16 == 0) uVar16 = 1;
     uVar16 = (uVar16 * 100000) / 0x1d216;
     if (0xe90a < uVar16 % 0x1d216) {
       uVar16 = uVar16 + 1;
@@ -32453,48 +32398,35 @@ long FUN_00450740(undefined4 param_1,undefined4 param_2) {
 }
 
 // ===== FUN_00450760 @ 00450760 =====
+/* WARNING: Globals starting with '_' overlap smaller symbols at the same address */
+
 undefined4 FUN_00450760(LPCSTR param_1) {
-  void *stack0xfffffee0;
-  void *stack0xfffffee8;
-  void *stack0xfffffeec;
-  void *stack0xfffffef0;
-  char cVar1;
+  CHAR local_10c[268];
+  CHAR eqdrive[4];
+  CHAR first;
   BOOL BVar2;
   DWORD DVar3;
-  undefined1 *puVar4;
-  DWORD aDStackY_128 [2];
-  LPSTR lpBuffer;
-  CHAR local_10c [268];
-  
-  puVar4 = ((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)&stack0xfffffef0))))))))))))))))));
   BVar2 = SetCurrentDirectoryA(param_1);
-  if (BVar2 != 0) {
-    lpBuffer = local_10c;
-    puVar4 = ((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)&stack0xfffffee8))))))))))))))))));
-    DVar3 = GetCurrentDirectoryA(0x105,lpBuffer);
-    if (DVar3 != 0) {
-      cVar1 = (char)lpBuffer;
-      if (((cVar1 == '\\') || (cVar1 == '/')) && (cVar1 == (char)((uint)lpBuffer >> 8))) {
-        return 0;
-      }
-      /* the original here calls the CharUpperA helper (FUN_00454480) on the * just-read directory string; its zero-arg call site loses the arg in * the decompilation, and passing the buffer address would run the * DBCS/CharUpper path on a 32-bit-truncated char* -- skip it: getcwd * output is already the canonical form this code wants */
-      BVar2 = SetEnvironmentVariableA(lpBuffer,"BBLIT");
-      if (BVar2 != 0) {
-        return 0;
-      }
-      if (BVar2 != 0) {
-        return 0;
-      }
-    }
+  if (BVar2 == 0) goto fail;
+  DVar3 = GetCurrentDirectoryA(0x105,local_10c);
+  if (DVar3 == 0) goto fail;
+  if (((local_10c[0] == '\\') || (local_10c[0] == '/')) && (local_10c[0] == local_10c[1])) {
+    return 0;
   }
-  *(undefined4 *)(puVar4 + -4) = 0x4507e6;
+  /* "=X:" name; FUN_00454480 is a locale-aware toupper, ASCII-equal here */
+  first = local_10c[0];
+  eqdrive[0] = '=';
+  eqdrive[1] = (CHAR)((first >= 'a' && first <= 'z') ? first - ('a' - 'A') : first);
+  eqdrive[2] = ':';
+  eqdrive[3] = '\0';
+  BVar2 = SetEnvironmentVariableA(eqdrive,local_10c);
+  if (BVar2 == 0) goto fail;
+  return 0;
+fail:
   DVar3 = GetLastError();
-  *(DWORD *)(puVar4 + -4) = DVar3;
-  *(undefined4 *)(puVar4 + -8) = 0x4507ec;
-  FUN_00452de0(*(DWORD *)(puVar4 + -4));
+  FUN_00452de0(DVar3);
   return 0xffffffff;
 }
-
 // ===== FUN_00450800 @ 00450800 =====
 void FUN_00450800(undefined4 param_1) {
   DAT_004ae610 = param_1;
@@ -33406,13 +33338,18 @@ void FUN_00451a20(undefined1 *param_1,undefined1 *param_2,int param_3) {
 }
 
 // ===== FUN_00451a50 @ 00451a50 =====
-undefined4 FUN_00451a50(undefined4 param_1) {
-  void *stack0x00000008;
+/* LP64: variadic forwarder.  On x86 this pushed &(caller's arg area) as the * va cursor for game_vfprintf_core's slot machine; here the C varargs are * spilled into 4-byte slots (the widths the machine advances by).  Values * are exact for ints and image addresses; slots the format never consumes * may hold caller-stack window data, exactly as the original's stack window * did.  12 slots cover every in-tree format (max observed: 2 args). */
+undefined4 FUN_00451a50(undefined4 param_1, ...) {
   undefined4 uVar1;
   undefined4 uVar2;
-  
+  data_u32 va_args[12];
+  va_list ap;
+
   uVar1 = FUN_00453f00(&DAT_004ae668);
-  uVar2 = ((long (*)())game_vfprintf_core)(&DAT_004ae668,param_1,((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)&stack0x00000008)))))))))))))))))));
+  va_start(ap,param_1);
+  for (int i = 0; i < 12; i++) va_args[i] = (data_u32)va_arg(ap,uintptr_t);
+  va_end(ap);
+  uVar2 = game_vfprintf_core((undefined4)(uintptr_t)&DAT_004ae668,(char *)(uintptr_t)param_1,va_args);
   FUN_00453fa0(uVar1,&DAT_004ae668);
   return uVar2;
 }
@@ -33832,12 +33769,12 @@ undefined ** FUN_004520e0(void) {
   if (puVar2 != (undefined4 *)0x0) {
     pvVar3 = VirtualAlloc((LPVOID)puVar2,0x10000,0x1000,4);
     if (pvVar3 != (LPVOID)0x0) {
-      /* First arena: the image sentinel is self-linked (both slots * hold 0x4ae8e0), so link ppuVar8 as its only element directly. */
+      /* First arena: the sentinel is self-linked, so link ppuVar8 * as its only element directly. */
       {
         *ppuVar8 = (undefined *)&PTR_LOOP_004ae8e0;
         ppuVar8[1] = (undefined *)&PTR_LOOP_004ae8e0;
-        *(data_u32 *)0x4ae8e0ul = (data_u32)(uintptr_t)ppuVar8;
-        *(data_u32 *)0x4ae8e4ul = (data_u32)(uintptr_t)ppuVar8;
+        bblit_arena_sentinel[0] = (void *)ppuVar8;
+        bblit_arena_sentinel[1] = (void *)ppuVar8;
       } /* LP64 tail-slot fix */
       ppuVar8[5] = (undefined *)(puVar2 + 0x100000);
       ppuVar8[4] = (undefined *)puVar2;
@@ -33866,6 +33803,7 @@ undefined ** FUN_004520e0(void) {
           puVar2 = puVar2 + 0x400;
         } while (puVar2 < ppuVar8[4] + 0x10000);
       }
+      *(data_u32 *)0x4b0900ul = (data_u32)(uintptr_t)ppuVar8;
       return ppuVar8;
     }
     VirtualFree(puVar2,0x400000,0x8000);
@@ -33884,7 +33822,7 @@ void FUN_00452250(undefined **param_1) {
   }
   if (param_1 != &PTR_LOOP_004ae8e0) {
     *(undefined **)param_1[1] = *param_1;
-    *(undefined **)(*param_1 + 4) = param_1[1];
+    *(undefined **)(*param_1 + 8) = param_1[1];
     HeapFree((void *)(uintptr_t)(DAT_009caae4),0,param_1);
     return;
   }
@@ -33906,7 +33844,7 @@ void FUN_004522b0(void) {
   undefined *puVar9;
   
   puVar6 = ((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)&stack0xfffffff0))))))))))))))))));
-  puVar8 = (undefined *)(uintptr_t)*(data_u32 *)0x4ae8e4ul;
+  puVar8 = (undefined *)bblit_arena_sentinel[1];
   do {
     puVar9 = puVar8;
     if (*(int *)(puVar8 + 0x10) != -1) {
@@ -33957,7 +33895,7 @@ void FUN_004522b0(void) {
         }
       }
     }
-    if ((puVar9 == (undefined *)(uintptr_t)*(data_u32 *)0x4ae8e4ul) || (puVar8 = puVar9, *(int *)(puVar6 + 0x14) < 1)) {
+    if ((puVar9 == (undefined *)bblit_arena_sentinel[1]) || (puVar8 = puVar9, *(int *)(puVar6 + 0x14) < 1)) {
       return;
     }
   } while( true );
@@ -34033,7 +33971,7 @@ int * FUN_00452440(uint param_1) {
       iVar8 = ((long)(uintptr_t)piVar10 + (-0x30 - (long)(uintptr_t)piVar4) >> 3) * 0x1000 + *(int *)((char *)piVar4 + 32);
       for (; piVar10 < (int *)((char *)piVar4 + 0x4030); piVar10 = piVar10 + 2) {
         if (((int)param_1 <= *piVar10) && (param_1 < (uint)piVar10[1])) {
-          piVar2 = (int *)FUN_00452680((byte *)(uintptr_t)(unsigned long)(iVar8),*piVar10,param_1);
+          piVar2 = (int *)FUN_00452680((int *)(uintptr_t)(unsigned long)(iVar8),*piVar10,param_1);
           if (piVar2 != (int *)0x0) {
             *(data_u32 *)0x4b0900ul = (data_u32)(uintptr_t)piVar4;
             *piVar10 = *piVar10 - param_1;
@@ -34048,7 +33986,7 @@ int * FUN_00452440(uint param_1) {
       iVar8 = *(int *)((char *)piVar4 + 32);
       for (piVar10 = (int *)((char *)piVar4 + 48); piVar10 < piVar2; piVar10 = piVar10 + 2) {
         if (((int)param_1 <= *piVar10) && (param_1 < (uint)piVar10[1])) {
-          piVar3 = (int *)FUN_00452680((byte *)(uintptr_t)(unsigned long)(iVar8),*piVar10,param_1);
+          piVar3 = (int *)FUN_00452680((int *)(uintptr_t)(unsigned long)(iVar8),*piVar10,param_1);
           if (piVar3 != (int *)0x0) {
             *(data_u32 *)0x4b0900ul = (data_u32)(uintptr_t)piVar4;
             *piVar10 = *piVar10 - param_1;
@@ -34124,7 +34062,7 @@ int * FUN_00452440(uint param_1) {
 }
 
 // ===== FUN_00452680 @ 00452680 =====
-int FUN_00452680(byte *param_1,uint param_2,uint param_3) {
+int FUN_00452680(int *param_1,uint param_2,uint param_3) {
   byte bVar1;
   byte *pbVar2;
   byte *pbVar3;
@@ -34584,7 +34522,8 @@ undefined4 FUN_00453060(uint param_1) {
 
 // ===== FUN_004530b0 @ 004530b0 =====
 void FUN_004530b0(void) {
-  void *stack0xffffffa4;
+  /* LP64: x86 frame anchor; real slot arena below. */
+  char slots_530b0[128];
   byte bVar1;
   undefined4 *puVar2;
   DWORD DVar3;
@@ -34616,8 +34555,8 @@ void FUN_004530b0(void) {
     } while (puVar2 < DAT_009ca9e0 + 0x40);
   }
   GetStartupInfoA((LPSTARTUPINFOA)local_44);
-  puVar7 = ((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)&stack0xffffffa4))))))))))))))))));
-  if ((DATAPART(local_44,46,2) != 0) && (puVar7 = ((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)&stack0xffffffa4)))))))))))))))))), (int *)DATAPART(local_44,48,4) != (int *)0x0)) {
+  puVar7 = ((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)(slots_530b0 + 0x40)))))))))))))))))));
+  if ((DATAPART(local_44,46,2) != 0) && (puVar7 = ((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)(slots_530b0 + 0x40))))))))))))))))))), (int *)DATAPART(local_44,48,4) != (int *)0x0)) {
     iVar13 = *(int *)DATAPART(local_44,48,4);
     pbVar12 = (byte *)(DATAPART(local_44,48,4) + 4);
     pbVar9 = pbVar12 + iVar13;
@@ -34646,8 +34585,8 @@ void FUN_004530b0(void) {
       } while (DAT_009caae0 < iVar13);
     }
     uVar11 = 0;
-    puVar7 = ((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)&stack0xffffffa4))))))))))))))))));
-    puVar6 = ((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)&stack0xffffffa4))))))))))))))))));
+    puVar7 = ((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)(slots_530b0 + 0x40)))))))))))))))))));
+    puVar6 = ((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)(slots_530b0 + 0x40)))))))))))))))))));
     if (0 < iVar4) {
       do {
         puVar7 = puVar6;
@@ -34762,7 +34701,20 @@ undefined4 FUN_00453300(int *param_1) {
 }
 
 // ===== game_vfprintf_core @ 00453400 =====
-undefined4 game_vfprintf_core(undefined4 param_1,char *param_2) {
+/* Format-char class table: binary bytes at 0x45cd30+c for c in
+ * 0x20..0x78 (extracted from bugs.exe; the decompile renders the base as
+ * the "?IsProcessorFeaturePresent" string, whose tail overlaps the table).
+ * A C string literal cannot reproduce the following bytes. */
+static const unsigned char fmt_class[89] = {
+  6, 0, 0, 6, 0, 1, 0, 0, 0, 0, 3, 6, 0, 6, 2, 0,
+  4, 5, 5, 5, 5, 5, 5, 5, 5, 5, 0, 0, 0, 0, 0, 0,
+  0, 0, 8, 8, 0, 8, 7, 8, 0, 7, 0, 0, 7, 0, 7, 0,
+  0, 0, 0, 8, 0, 0, 0, 0, 8, 0, 8, 0, 0, 0, 0, 0,
+  0, 0, 0, 8, 8, 8, 8, 8, 7, 8, 0, 0, 7, 0, 8, 8,
+  8, 0, 0, 8, 0, 8, 0, 7, 8,
+};
+
+undefined4 game_vfprintf_core(undefined4 param_1,char *param_2,data_u32 *param_3) {
   char cVar1;
   undefined1 uVar2;
   short sVar3;
@@ -34803,6 +34755,30 @@ undefined4 game_vfprintf_core(undefined4 param_1,char *param_2) {
   puVar15 = (void *)(char *)f00453400_frame;
   iVar11 = 0;
   puVar16 = (undefined1 *)0x0;
+  /* LP64 va/struct convention (replaces x86 slot staging).  On x86 the
+   * +0x260 slot carried the first arg (the print struct: [esp+0x260] is the
+   * arg slot, verified at the 0x453b70 call sequence) and +0x268 the va
+   * cursor (third arg).  Neither arrives in the port, so both are seeded
+   * from the C params; every slot traffic below then works unchanged in
+   * the vf_frame arena.  Outgoing-arg slots (-4..-0x24) are callee-
+   * invisible on LP64 and became direct calls.  Companion changes:
+   * FUN_00453e60's cursor cell widened to uintptr_t, FUN_00453e20 void ->
+   * long with silicon-faithful returns, __aullrem/__aulldiv are native
+   * 64-bit (divisor-hi slot +0x48 is never stored).  Deferred (unreached,
+   * same disease): the wide-char 53ea0/58400 sites, the float indirect
+   * calls, 53e80, and sprintf va-forwarding at FUN_00450420/450490. */
+  *(undefined4 *)(puVar15 + 0x260) = param_1;
+  *(undefined1 **)(puVar15 + 0x268) = (undefined1 *)param_3;
+  /* the decompile drops two more x86 arrivals the loop depends on: the
+   * counter at +0x1c (mov [esp+0x1c],0 at 0x453415; stale arena state made
+   * later calls loop wrong) and the format cursor at +0x264 (mov at
+   * 0x453422; a zero slot faulted the second print at game_vfprintf:35182). */
+  *(int *)(puVar15 + 0x1c) = 0;
+  /* LP64: +0x264 is a 4-byte x86 slot; an 8-byte char* store's high half
+   * zeroes the low 4 bytes of the +0x268 va cursor (observed: first %d
+   * fetch faulted on cur=0x7ffd00000000).  The format cursor is always an
+   * image address, so 4-byte traffic is exact. */
+  *(undefined4 *)(puVar15 + 0x264) = (undefined4)(uintptr_t)param_2;
   cVar13 = *param_2;
   param_2 = param_2 + 1;
   puVar14 = (void *)(char *)f00453400_frame;
@@ -34812,28 +34788,32 @@ undefined4 game_vfprintf_core(undefined4 param_1,char *param_2) {
         uVar4 = 0;
       }
       else {
-        uVar4 = (byte)"?IsProcessorFeaturePresent"[cVar13 + 0x19] & 0xf;
+        /* LP64: the class bytes are the binary's own data at 0x45cd30+c
+         * (verified: 'l'->7, 'x'->8); the C string literal is followed by
+         * unrelated .rodata so indexing 57..145 past it read garbage. */
+        uVar4 = fmt_class[cVar13 - ' '] & 0xf;
       }
-      cVar1 = (&DAT_0045cd50)[uVar4 * 8 + iVar11];
+      /* LP64: the dispatch reads BYTES (assembly movsx eax, BYTE PTR
+       * [ecx+eax*8+0x45cd50]); data_u32* indexing lands 4x too far
+       * (observed: literal 's' read state 6 instead of 0, literal 'n'
+       * fell into case 'n' and stored through a NULL fetch). */
+      cVar1 = ((signed char *)&DAT_0045cd50)[uVar4 * 8 + iVar11];
       *(int *)(puVar15 + 0x3c) = (int)cVar1 >> 4;
+      /* assembly 0x453470: cmp eax,7 / ja 0x453c3a — states 8..15 skip the
+       * 8-case dispatch and advance to the next format char. */
+      if (7 < ((int)cVar1 >> 4)) {
+        goto LAB_00453c3a;
+      }
       switch((int)cVar1 >> 4) {
       case 0:
 switchD_0045347d_caseD_0:
         *(undefined4 *)(puVar15 + 0x2c) = 0;
         if ((PTR_DAT_004b0a98[(*(uint *)(puVar15 + 0x40) & 0xff) * 2 + 1] & 0x80) != 0) {
-          *(undefined1 **)(puVar15 + -4) = puVar15 + 0x1c;
-          *(undefined4 *)(puVar15 + -8) = *(undefined4 *)(puVar15 + 0x260);
-          *(int *)(puVar15 + -0xc) = (int)cVar13;
-          *(undefined4 *)(puVar15 + -0x10) = 0x453630;
-          ((long (*)())FUN_00453d90)();
+          FUN_00453d90((int)cVar13,(int *)(uintptr_t)(*(undefined4 *)(puVar15 + 0x260)),(int *)(puVar15 + 0x1c));
           cVar13 = *param_2;
-          *(char **)(puVar15 + 0x264) = param_2 + 1;
+          *(undefined4 *)(puVar15 + 0x264) = (undefined4)(uintptr_t)(param_2 + 1);
         }
-        *(undefined1 **)(puVar15 + -4) = puVar15 + 0x1c;
-        *(undefined4 *)(puVar15 + -8) = *(undefined4 *)(puVar15 + 0x260);
-        *(int *)(puVar15 + -0xc) = (int)cVar13;
-        *(undefined4 *)(puVar15 + -0x10) = 0x453653;
-        ((long (*)())FUN_00453d90)();
+        FUN_00453d90((int)cVar13,(int *)(uintptr_t)(*(undefined4 *)(puVar15 + 0x260)),(int *)(puVar15 + 0x1c));
         break;
       case 1:
         *(undefined4 *)(puVar15 + 0x44) = 0;
@@ -34864,9 +34844,7 @@ switchD_0045347d_caseD_0:
         break;
       case 3:
         if (cVar13 == '*') {
-          *(undefined1 **)(puVar15 + -4) = puVar15 + 0x268;
-          *(undefined4 *)(puVar15 + -8) = 0x453524;
-          iVar11 = ((long (*)())FUN_00453e60)();
+                    iVar11 = (int)FUN_00453e60((uintptr_t *)(puVar15 + 0x268));
           *(int *)(puVar15 + 0x28) = iVar11;
           if (iVar11 < 0) {
             *(uint *)(puVar15 + 0x10) = *(uint *)(puVar15 + 0x10) | 4;
@@ -34882,9 +34860,7 @@ switchD_0045347d_caseD_0:
         break;
       case 5:
         if (cVar13 == '*') {
-          *(undefined1 **)(puVar15 + -4) = puVar15 + 0x268;
-          *(undefined4 *)(puVar15 + -8) = 0x453577;
-          iVar11 = ((long (*)())FUN_00453e60)();
+                    iVar11 = (int)FUN_00453e60((uintptr_t *)(puVar15 + 0x268));
           *(int *)(puVar15 + 0x18) = iVar11;
           if (iVar11 < 0) {
             *(undefined4 *)(puVar15 + 0x18) = 0xffffffff;
@@ -34901,7 +34877,7 @@ switchD_0045347d_caseD_0:
             *(undefined4 *)(puVar15 + 0x3c) = 0;
             goto switchD_0045347d_caseD_0;
           }
-          *(char **)(puVar15 + 0x264) = param_2 + 2;
+          *(undefined4 *)(puVar15 + 0x264) = (undefined4)(uintptr_t)(param_2 + 2);
           *(uint *)(puVar15 + 0x10) = *(uint *)(puVar15 + 0x10) | 0x8000;
           break;
         case 'h':
@@ -34922,9 +34898,7 @@ switchD_0045347d_caseD_0:
           }
         case 'c':
           if ((*(uint *)(puVar15 + 0x10) & 0x810) == 0) {
-            *(undefined1 **)(puVar15 + -4) = puVar15 + 0x268;
-            *(undefined4 *)(puVar15 + -8) = 0x4536fa;
-            uVar2 = ((long (*)())FUN_00453e60)();
+                        uVar2 = (undefined1)FUN_00453e60((uintptr_t *)(puVar15 + 0x268));
             puVar15[0x5c] = uVar2;
             puVar16 = (undefined1 *)0x1;
           }
@@ -35005,9 +34979,7 @@ switchD_0045347d_caseD_0:
           if (*(int *)(puVar15 + 0x18) != -1) {
             iVar11 = *(int *)(puVar15 + 0x18);
           }
-          *(undefined1 **)(puVar15 + -4) = puVar15 + 0x268;
-          *(undefined4 *)(puVar15 + -8) = 0x4537ab;
-          psVar6 = (short *)((long (*)())FUN_00453e60)();
+                    psVar6 = (short *)(uintptr_t)FUN_00453e60((uintptr_t *)(puVar15 + 0x268));
           *(short **)(puVar15 + 0x14) = psVar6;
           if ((*(uint *)(puVar15 + 0x10) & 0x810) == 0) {
             psVar12 = psVar6;
@@ -35036,9 +35008,7 @@ switchD_0045347d_caseD_0:
         case 'X':
           goto switchD_00453691_caseD_58;
         case 'Z':
-          *(undefined1 **)(puVar15 + -4) = puVar15 + 0x268;
-          *(undefined4 *)(puVar15 + -8) = 0x453720;
-          psVar6 = (short *)((long (*)())FUN_00453e60)();
+                    psVar6 = (short *)(uintptr_t)FUN_00453e60((uintptr_t *)(puVar15 + 0x268));
           if ((psVar6 == (short *)0x0) || (iVar11 = *(int *)(psVar6 + 2), iVar11 == 0)) {
             uVar4 = 0xffffffff;
             *(undefined **)(puVar15 + 0x14) = (undefined *)(PTR_DAT_004b0a90);
@@ -35069,9 +35039,7 @@ switchD_0045347d_caseD_0:
           *(uint *)(puVar15 + 0x10) = *(uint *)(puVar15 + 0x10) | 0x40;
           goto LAB_004539c7;
         case 'n':
-          *(undefined1 **)(puVar15 + -4) = puVar15 + 0x268;
-          *(undefined4 *)(puVar15 + -8) = 0x453833;
-          puVar7 = (undefined4 *)((long (*)())FUN_00453e60)();
+                    puVar7 = (undefined4 *)(uintptr_t)FUN_00453e60((uintptr_t *)(puVar15 + 0x268));
           if ((puVar15[0x10] & 0x20) == 0) {
             *(undefined4 *)(puVar15 + 0x34) = 1;
             *puVar7 = *(undefined4 *)(puVar15 + 0x1c);
@@ -35106,28 +35074,20 @@ LAB_004539c7:
           if ((uVar4 & 0x8000) == 0) {
             if ((uVar4 & 0x20) == 0) {
               if ((uVar4 & 0x40) == 0) {
-                *(undefined1 **)(puVar15 + -4) = puVar15 + 0x268;
-                *(undefined4 *)(puVar15 + -8) = 0x453a3f;
-                uVar8 = ((long (*)())FUN_00453e60)();
+                                uVar8 = (undefined4)FUN_00453e60((uintptr_t *)(puVar15 + 0x268));
                 uVar20 = (ulonglong)uVar8;
               }
               else {
-                *(undefined1 **)(puVar15 + -4) = puVar15 + 0x268;
-                *(undefined4 *)(puVar15 + -8) = 0x453a2c;
-                iVar11 = ((long (*)())FUN_00453e60)();
+                                iVar11 = (int)FUN_00453e60((uintptr_t *)(puVar15 + 0x268));
                 uVar20 = (ulonglong)iVar11;
               }
             }
             else if ((uVar4 & 0x40) == 0) {
-              *(undefined1 **)(puVar15 + -4) = puVar15 + 0x268;
-              *(undefined4 *)(puVar15 + -8) = 0x453a0f;
-              uVar8 = ((long (*)())FUN_00453e60)();
+                            uVar8 = (undefined4)FUN_00453e60((uintptr_t *)(puVar15 + 0x268));
               uVar20 = (ulonglong)(uVar8 & 0xffff);
             }
             else {
-              *(undefined1 **)(puVar15 + -4) = puVar15 + 0x268;
-              *(undefined4 *)(puVar15 + -8) = 0x4539f9;
-              sVar3 = ((long (*)())FUN_00453e60)();
+                            sVar3 = (short)FUN_00453e60((uintptr_t *)(puVar15 + 0x268));
               uVar20 = (ulonglong)(int)sVar3;
             }
           }
@@ -35160,27 +35120,33 @@ LAB_004539c7:
           *(undefined1 **)(puVar15 + 0x14) = puVar14;
           while ((*(int *)(puVar15 + 0x18) = iVar10 + -1, 0 < iVar10 || (lVar21 != 0))) {
             iVar11 = *(int *)(puVar15 + 0x30);
-            *(int *)(puVar15 + -4) = iVar11 >> 0x1f;
-            *(int *)(puVar15 + -8) = iVar11;
-            *(longlong *)(puVar15 + -0x10) = lVar21;
-            *(int *)(puVar15 + 0x58) = iVar11 >> 0x1f;
-            *(undefined4 *)(puVar15 + -0x14) = 0x453ac7;
-            iVar9 = ((long (*)())__aullrem)();
-            *(undefined4 *)(puVar15 + -0x14) = *(undefined4 *)(puVar15 + 0x48);
-            *(int *)(puVar15 + -0x18) = iVar11;
-            *(longlong *)(puVar15 + -0x20) = lVar21;
+            /* LP64: native 64-bit divide; x86 passed (lo,hi,blo,bhi). */
+            iVar9 = (int)__aullrem((ulonglong)lVar21,(ulonglong)(long long)iVar11);
             iVar9 = iVar9 + 0x30;
-            *(undefined4 *)(puVar15 + -0x24) = 0x453ad9;
-            lVar21 = ((long (*)())__aulldiv)();
+            /* LP64: native 64-bit divide; divisor-hi slot (+0x48) is never
+             * stored anywhere in this function, so it reads as 0 (entry note). */
+            lVar21 = (long long)__aulldiv((ulonglong)lVar21,(ulonglong)(long long)iVar11);
+            /* assembly 0x453ae2: add ebx,[esp+0x38] — the hex-letter bias
+             * (+0x38 = 7 for %X, 0x27 for %x), not the +0x18 counter. */
             if (0x39 < iVar9) {
-              iVar9 = iVar9 + *(int *)(puVar15 + 0x18);
+              iVar9 = iVar9 + *(int *)(puVar15 + 0x38);
             }
-            puVar14 = *(undefined1 **)(puVar15 + -0xc);
-            iVar10 = *(int *)(puVar15 + -8);
+            /* LP64: the decompile maps the [esp+0x14] digit pointer and
+             * [esp+0x18] counter onto outgoing-arg slots -0xc/-8
+             * (callee-invisible on LP64; -0xc read faulted) and invents a
+             * -0x20 frame walk the assembly has no trace of (the loop is
+             * 0x453aa2-0x453af5: reload, store, dec, spill, jmp). */
+            /* LP64: +0x14 (digit pointer) and +0x18 (counter) are adjacent
+             * 4-byte x86 slots; the 8-byte pointer spill's high half IS
+             * +0x18, so the while-condition's counter store zeroes... then
+             * destroys the pointer (observed: 2nd digit read
+             * slot14=0xffffffff4863a2da).  The C locals already carry both
+             * values across the pure div calls, so the loop keeps them in
+             * locals and never respills.  (Single-digit values survived
+             * only because post-loop code uses the local.) */
+            iVar10 = *(int *)(puVar15 + 0x18);
             *puVar14 = (char)iVar9;
             puVar14 = puVar14 + -1;
-            *(undefined1 **)(puVar15 + -0xc) = puVar14;
-            puVar15 = puVar15 + -0x20;
           }
           puVar16 = puVar15 + (0x25b - (long)(uintptr_t)puVar14);
           *(undefined1 **)(puVar15 + 0x14) = puVar14 + 1;
@@ -35214,74 +35180,42 @@ LAB_004539c7:
 LAB_00453b5f:
           iVar11 = (*(int *)(puVar15 + 0x28) - *(int *)(puVar15 + 0x24)) - (long)(uintptr_t)puVar16;
           if ((uVar4 & 0xc) == 0) {
-            uVar5 = *(undefined4 *)(puVar15 + 0x260);
-            *(undefined1 **)(puVar15 + -4) = puVar15 + 0x1c;
-            *(undefined4 *)(puVar15 + -8) = uVar5;
-            *(int *)(puVar15 + -0xc) = iVar11;
-            *(undefined4 *)(puVar15 + -0x10) = 0x20;
-            *(undefined4 *)(puVar15 + -0x14) = 0x453b85;
-            ((long (*)())FUN_00453de0)();
+            uVar5 = param_1;
+            FUN_00453de0(0x20,iVar11,uVar5,(int *)(puVar15 + 0x1c));
           }
           else {
-            uVar5 = *(undefined4 *)(puVar15 + 0x260);
+            uVar5 = param_1;
           }
-          *(undefined1 **)(puVar15 + -4) = puVar15 + 0x1c;
-          *(undefined4 *)(puVar15 + -8) = uVar5;
-          *(undefined4 *)(puVar15 + -0xc) = *(undefined4 *)(puVar15 + 0x24);
-          *(undefined1 **)(puVar15 + -0x10) = puVar15 + 0x22;
-          *(undefined4 *)(puVar15 + -0x14) = 0x453ba6;
-          ((long (*)())FUN_00453e20)();
+          FUN_00453e20((char *)(puVar15 + 0x22),*(int *)(puVar15 + 0x24),uVar5,(int *)(puVar15 + 0x1c));
           if (((uVar4 & 8) != 0) && ((uVar4 & 4) == 0)) {
-            *(undefined1 **)(puVar15 + -4) = puVar15 + 0x1c;
-            *(undefined4 *)(puVar15 + -8) = uVar5;
-            *(int *)(puVar15 + -0xc) = iVar11;
-            *(undefined4 *)(puVar15 + -0x10) = 0x30;
-            *(undefined4 *)(puVar15 + -0x14) = 0x453bc1;
-            ((long (*)())FUN_00453de0)();
+            FUN_00453de0(0x30,iVar11,uVar5,(int *)(puVar15 + 0x1c));
           }
           iVar10 = *(int *)(puVar15 + 0x2c);
           if ((iVar10 == 0) || ((long)(uintptr_t)puVar16 < 1)) {
-            *(undefined1 **)(puVar15 + -4) = puVar15 + 0x1c;
-            *(undefined4 *)(puVar15 + -8) = uVar5;
-            *(undefined1 **)(puVar15 + -0xc) = puVar16;
-            *(undefined4 *)(puVar15 + -0x10) = *(undefined4 *)(puVar15 + 0x14);
-            *(undefined4 *)(puVar15 + -0x14) = 0x453c77;
-            ((long (*)())FUN_00453e20)();
+            FUN_00453e20(*(char **)(puVar15 + 0x14),(int)(uintptr_t)puVar16,uVar5,(int *)(puVar15 + 0x1c));
           }
           else {
             puVar17 = *(undefined2 **)(puVar15 + 0x14);
             puVar14 = puVar16;
             do {
               puVar14 = puVar14 + -1;
-              *(uint *)(puVar15 + -4) = CONCAT22((short)((uint)iVar10 >> 0x10),*puVar17);
-              *(undefined1 **)(puVar15 + -8) = puVar15 + 0x48;
+              iVar10 = FUN_00458400((LPSTR)(puVar15 + 0x48),(ushort)*puVar17);
               puVar17 = puVar17 + 1;
-              *(undefined4 *)(puVar15 + -0xc) = 0x453bf0;
-              iVar10 = ((long (*)())FUN_00458400)();
               if (iVar10 < 1) break;
-              *(undefined1 **)(puVar15 + -4) = puVar15 + 0x1c;
-              *(undefined4 *)(puVar15 + -8) = *(undefined4 *)(puVar15 + 0x260);
-              *(int *)(puVar15 + -0xc) = iVar10;
-              *(undefined1 **)(puVar15 + -0x10) = puVar15 + 0x48;
-              *(undefined4 *)(puVar15 + -0x14) = 0x453c0f;
-              iVar10 = ((long (*)())FUN_00453e20)();
+              iVar10 = (int)FUN_00453e20((char *)(puVar15 + 0x48),iVar10,*(undefined4 *)(puVar15 + 0x260),(int *)(puVar15 + 0x1c));
             } while (puVar14 != (undefined1 *)0x0);
             uVar4 = *(uint *)(puVar15 + 0x10);
           }
           if ((uVar4 & 4) != 0) {
-            *(undefined1 **)(puVar15 + -4) = puVar15 + 0x1c;
-            *(undefined4 *)(puVar15 + -8) = *(undefined4 *)(puVar15 + 0x260);
-            *(int *)(puVar15 + -0xc) = iVar11;
-            *(undefined4 *)(puVar15 + -0x10) = 0x20;
-            *(undefined4 *)(puVar15 + -0x14) = 0x453c37;
-            ((long (*)())FUN_00453de0)();
+            FUN_00453de0(0x20,iVar11,uVar5,(int *)(puVar15 + 0x1c));
           }
         }
       }
-      cVar13 = **(char **)(puVar15 + 0x264);
-      param_2 = *(char **)(puVar15 + 0x264) + 1;
+LAB_00453c3a:
+      cVar13 = *(char *)(uintptr_t)(*(undefined4 *)(puVar15 + 0x264));
+      param_2 = (char *)(uintptr_t)(*(undefined4 *)(puVar15 + 0x264)) + 1;
       puVar15[0x40] = cVar13;
-      *(char **)(puVar15 + 0x264) = param_2;
+      *(undefined4 *)(puVar15 + 0x264) = (undefined4)(uintptr_t)param_2;
       if (cVar13 == '\0') break;
       local_234 = *(int *)(puVar15 + 0x28);
       iVar11 = *(int *)(puVar15 + 0x3c);
@@ -35300,7 +35234,8 @@ void FUN_00453d90(uint param_1,int *param_2,int *param_3) {
     param_1 = FUN_00451600(param_1,param_2);
   }
   else {
-    *(char *)*param_2 = (char)param_1;
+    /* LP64: the cursor is a 32-bit image address; plain (char *) sign-extends * heap buffers above 2 GiB (observed: ASan SEGV on 0xffffffffc99e0100 * for a valid heap cursor on the very first print).  Zero-extend. */
+    *(char *)(uintptr_t)(unsigned)*param_2 = (char)param_1;
     param_1 = param_1 & 0xff;
     *param_2 = *param_2 + 1;
   }
@@ -35325,27 +35260,29 @@ void FUN_00453de0(undefined4 param_1,int param_2,undefined4 param_3,int *param_4
 }
 
 // ===== FUN_00453e20 @ 00453e20 =====
-void FUN_00453e20(char *param_1,int param_2,undefined4 param_3,int *param_4) {
+/* LP64: returns the leftover eax like the silicon: counter-ptr on success * (here 1: only the sign is consumed and the high bits are discarded by the * caller, while a truncated host pointer could compare < 1), param_2 when * nothing ran, -1 on error.  Promoted void -> long like fix_void_value_used. */
+long FUN_00453e20(char *param_1,int param_2,undefined4 param_3,int *param_4) {
   char cVar1;
   
   do {
     if (param_2 < 1) {
-      return;
+      return param_2;
     }
     param_2 = param_2 + -1;
     cVar1 = *param_1;
     param_1 = param_1 + 1;
     FUN_00453d90((int)cVar1,(int *)(uintptr_t)(param_3),param_4);
   } while (*param_4 != -1);
-  return;
+  return (*param_4 == -1) ? -1 : 1;
 }
 
 // ===== FUN_00453e60 @ 00453e60 =====
-undefined4 FUN_00453e60(int *param_1) {
+/* LP64: the va cursor cell holds a host address, so the int cell * truncated it on every advance (observed via the 53e60-fed %d garbage). * Widened to uintptr_t; the fetched arg stays a 4-byte value exactly as * on x86.  Caller sites pass &(cursor) instead of frame slots. */
+undefined4 FUN_00453e60(uintptr_t *param_1) {
   undefined4 *puVar1;
-  
-  puVar1 = (undefined4 *)*param_1;
-  *param_1 = (int)(puVar1 + 1);
+
+  puVar1 = (undefined4 *)(*param_1);
+  *param_1 = (uintptr_t)(puVar1 + 1);
   return *puVar1;
 }
 
@@ -35443,6 +35380,10 @@ void FUN_00453fa0(int param_1,undefined4 *param_2) {
 int FUN_00454000(uint param_1,char *param_2,uint param_3) {
   void *stack0xfffffbc0;
   void *stack0xfffffbd4;
+  /* LP64: x86 frame-anchor scratch; the translation buffer and arg
+   * slots address [-0x18, +0x410) around the anchor (0x400 buffer at
+   * +10 words).  A real 0x480 arena replaces both 8-byte slots. */
+  char slots_54000[0x480];
   byte bVar1;
   char cVar2;
   int iVar3;
@@ -35471,16 +35412,24 @@ int FUN_00454000(uint param_1,char *param_2,uint param_3) {
       }
       puVar5 = (undefined4 *)((&DAT_009ca9e0)[(int)param_1 >> 5] + iVar10);
       if ((*(byte *)(puVar5 + 1) & 0x80) == 0) {
-        piVar6 = (int *)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)&stack0xfffffbc0))))))))))))))))));
+        piVar6 = (int *)(slots_54000 + 0x20);
         BVar7 = WriteFile((HANDLE)*puVar5,param_2,param_3,local_410,(LPOVERLAPPED)0x0);
+        /* LP64: the shared tail reads total/this-call from piVar9[-1]/[-2], * but piVar9 is garbage on the direct path (observed: fault at the * tail).  Per the assembly the direct call leaves total=[esp+0x10] * and iVar3=[esp+0x18]: this-call/0 on success, 0/error on failure. */
         if (BVar7 == 0) {
-          GetLastError();
-          piVar6 = (int *)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)&stack0xfffffbc0))))))))))))))))));
+          DVar8 = GetLastError();
+          piVar9 = (int *)(slots_54000 + 0x20);
+          piVar9[-1] = 0;
+          piVar9[-2] = (int)DVar8;
+        }
+        else {
+          piVar9 = (int *)(slots_54000 + 0x20);
+          piVar9[-1] = (int)local_410[0];
+          piVar9[-2] = 0;
         }
       }
       else {
-        piVar6 = (int *)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)&stack0xfffffbd4))))))))))))))))));
-        piVar4 = (int *)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)&stack0xfffffbd4))))))))))))))))));
+        piVar6 = (int *)(slots_54000 + 0x20);
+        piVar4 = (int *)(slots_54000 + 0x20);
         pcVar11 = param_2;
         if (param_3 != 0) {
 LAB_004540a6:
@@ -35508,7 +35457,7 @@ LAB_004540a6:
           piVar9[-6] = 0x454103;
           BVar7 = WriteFile((HANDLE)piVar9[-5],(LPCVOID)piVar9[-4],piVar9[-3],(LPDWORD)piVar9[-2], (LPOVERLAPPED)piVar9[-1]);
           if (BVar7 != 0) {
-            piVar9[-1] = piVar9[-1] + piVar9[2];
+            piVar9[-1] = piVar9[-1] + piVar9[-2];
             if ((piVar9[2] < (long)(uintptr_t)piVar6 - (int)(piVar9 + 10)) || (piVar4 = piVar9 + -5, param_3 <= (uint)((long)(uintptr_t)pcVar11 - (int)param_2))) goto LAB_00454125;
             goto LAB_004540a6;
           }
@@ -35516,16 +35465,17 @@ LAB_004540a6:
           DVar8 = GetLastError();
           piVar9[1] = DVar8;
 LAB_00454125:
-          iVar10 = *piVar9;
+          /* LP64: *piVar9 and the piVar6-relative reads below address x86 * frame slots that hold nothing in the port (observed: READ of 0 * at 35450).  Per the assembly: iVar10 reloads from its home, the * +0x10/+0x18 reads are the Written-total/this-call slots * (piVar9[-1]/[-2], both written on this path), the +0x20 * subtrahend is the lpOverlapped NULL push (always 0), and the * +0x24 double-deref is the chunk pointer. */
+          iVar10 = (param_1 & 0x1f) * 8;
           piVar6 = piVar9 + -5;
         }
       }
-      if (*(int *)((long)(uintptr_t)piVar6 + 0x10) != 0) {
-        return *(int *)((long)(uintptr_t)piVar6 + 0x10) - *(int *)((long)(uintptr_t)piVar6 + 0x20);
+      if (piVar9[-1] != 0) {
+        return piVar9[-1];
       }
-      iVar3 = *(int *)((long)(uintptr_t)piVar6 + 0x18);
+      iVar3 = piVar9[-2];
       if (iVar3 == 0) {
-        if (((*(byte *)(iVar10 + 4 + **(int **)((long)(uintptr_t)piVar6 + 0x24)) & 0x40) != 0) && (*param_2 == '\x1a')) {
+        if (((*(byte *)(iVar10 + 4 + (long)(uintptr_t)(&DAT_009ca9e0)[0]) & 0x40) != 0) && (*param_2 == '\x1a')) {
           return 0;
         }
         _DAT_004b1e14 = (data_u32 *)(uintptr_t)(0x1c);
@@ -35537,9 +35487,8 @@ LAB_00454125:
         _DAT_004b1e14 = (data_u32 *)(uintptr_t)(9);
         return -1;
       }
-      *(int *)((long)(uintptr_t)piVar6 + -4) = iVar3;
-      *(undefined4 *)((long)(uintptr_t)piVar6 + -8) = 0x454161;
-      ((long (*)())FUN_00452de0)();
+      /* LP64: direct call; the slot-staged arg is callee-invisible. */
+      FUN_00452de0((uint)iVar3);
       return -1;
     }
   }
