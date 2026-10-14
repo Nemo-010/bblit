@@ -43143,10 +43143,19 @@ void bblit_port_init(void)
     }
     mprotect((void *)BBLIT_BLOB_BASE, BBLIT_CODE_END - BBLIT_BLOB_BASE,
              PROT_READ | PROT_EXEC);
+    /* Two phases: pointer slots sit 4 bytes apart, so an 8-byte widening
+     * write clobbers the next slot's original value (observed: 0x4ac30c's
+     * write zeroed 0x4ac310, whose needle read back NULL and crashed
+     * strstr in sysinfo_cpu_detect).  Snapshot every original dword
+     * first, then write the widened pointers back. */
+    static data_u32 widen_snap[sizeof bblit_ptr_slots / sizeof bblit_ptr_slots[0]];
+    for (unsigned i = 0; i < sizeof bblit_ptr_slots / sizeof bblit_ptr_slots[0]; i++)
+        widen_snap[i] = *(volatile data_u32 *)(uintptr_t)bblit_ptr_slots[i];
     for (unsigned i = 0; i < sizeof bblit_ptr_slots / sizeof bblit_ptr_slots[0]; i++) {
         uintptr_t a = bblit_ptr_slots[i];
         /* original 4-byte slot value zero-extended into an 8-byte pointer */
         *(void *volatile *)a =
-            (void *)(uintptr_t)*(volatile data_u32 *)a;
+            (void *)(uintptr_t)widen_snap[i];
     }
+
 }

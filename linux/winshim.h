@@ -301,7 +301,10 @@ UINT SetErrorMode(UINT);
 UINT GetDriveTypeA(LPCSTR);
 BOOL GetVolumeInformationA(LPCSTR, LPSTR, DWORD, LPDWORD, LPDWORD, LPDWORD, LPSTR, DWORD);
 BOOL QueryPerformanceCounter(LARGE_INTEGER *);
+/* GetVersion (kernel32); value word: Win95 4.0 build 950-ish, platform 1. */
+DWORD GetVersion(void);
 DWORD GetTickCount(void);
+BOOL QueryPerformanceFrequency(LARGE_INTEGER *);
 BOOL QueryPerformanceFrequency(LARGE_INTEGER *);
 void Sleep(DWORD);
 LPSTR GetCommandLineA(void);

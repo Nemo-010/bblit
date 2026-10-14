@@ -57,7 +57,29 @@ long CARRY4(unsigned long a, unsigned long b) {
 unsigned long long rdtsc(void) {
     return __builtin_ia32_rdtsc();
 }
-unsigned char in(unsigned short port) { (void)port; return 0; }
+/* 8254 PIT channel-2 countdown, as sysinfo_cpu_detect programs it: mode 3
+ * (square wave, out(0x43,0xb8)) with an initial count of 0, then the game
+ * reads low/high bytes via in(0x42) pairs around a delay loop and derives
+ * the CPU MHz.  A flat 0 makes the divisor 0 (SIGFPE in 0x1fffe/uVar16).
+ * Report a steady counter so local_c lands at 200 ticks -> ~780 MHz,
+ * comfortably above the 300 MHz software-renderer gate.  Other ports
+ * have no emulation and keep reading 0. */
+static unsigned short pit_count = 0xFF38;
+static int pit_want_low = 1;
+unsigned char in(unsigned short port) {
+    if (port == 0x42) {
+        unsigned char r;
+        if (pit_want_low) {
+            r = (unsigned char)(pit_count & 0xff);
+        } else {
+            r = (unsigned char)(pit_count >> 8);
+            if (pit_count > 0xFE00) pit_count -= 3;
+        }
+        pit_want_low = !pit_want_low;
+        return r;
+    }
+    (void)port; return 0;
+}
 void out(unsigned short port, unsigned char val) { (void)port; (void)val; }
 
 long double f2xm1(long double x) { return exp2l((double)x) - 1.0L; }
