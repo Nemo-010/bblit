@@ -24,7 +24,12 @@ O=linux/build
 mkdir -p "$O"
 # Refuse a gcc-only source construct before spending a minute on the build.
 sh tools/check_portable_casts.sh
-CFLAGS="-O1 -g -fno-strict-aliasing -w -Ilinux"
+# -std=gnu17 is REQUIRED: ghidra_types.h defines `code` as an old-style
+# unprototyped function pointer so vtable call sites compile with their own
+# arity.  C23 (gcc 15+ / clang 20+ default) gives `()` a zero-argument
+# meaning and every indirect call becomes "too many arguments"
+# (100 errors on gcc 16; observed Oct 2026).  Both compilers accept gnu17.
+CFLAGS="-O1 -g -fno-strict-aliasing -w -Ilinux -std=gnu17"
 $CC $CFLAGS -c linux/bblit_game.c        -o "$O/bblit_game.o"
 $CC $CFLAGS -c linux/data_syms.c         -o "$O/data_syms.o"
 $CC $CFLAGS -c linux/port_main.c         -o "$O/port_main.o"

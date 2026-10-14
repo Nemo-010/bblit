@@ -422,9 +422,24 @@ def main():
     # referenced pointer-typed slots to widen
     # never widen inside .text: those dwords are data-shaped labels on code
     # (jump-table heads etc), read-only and already executable
-    slots = sorted((a) for a, d in info.items()
-                   if (d['ptr'] or d['called'] or d['kind'] == 'ptr')
-                   and int(a, 16) >= CODE_END)
+    # never widen a slot whose high half overlaps live non-slot data:
+    # an 8-byte write there destroys the neighbour (measured: 0x4b0900's
+    # write zeroed DAT_004b0904, the sub-allocator limit; 0x45f344's ate
+    # "BBLIT Game").  Those slots keep 4-byte storage and every runtime
+    # value they hold fits 32 bits (image addresses, small ints, and the
+    # arena links, whose blocks come from a sub-2GiB reserve), so plain
+    # 4-byte reads zero-extend correctly with no macro changes.
+    slots_pre = sorted((a) for a, d in info.items()
+                       if (d['ptr'] or d['called'] or d['kind'] == 'ptr')
+                       and int(a, 16) >= CODE_END)
+    slots_pre_int = set(int(x, 16) for x in slots_pre)
+    def high_half_live(a):
+        s = int(a, 16)
+        if (s + 4) in slots_pre_int:
+            return False
+        return any(bytemap.get(s + i, 0) for i in range(4, 8))
+    slots = [a for a in slots_pre if not high_half_live(a)]
+    nskip = len(slots_pre) - len(slots)
     body.append('static const unsigned bblit_ptr_slots[] = {')
     for a in slots:
         body.append(f'  0x{a},')
@@ -451,11 +466,19 @@ def main():
     body.append('    }')
     body.append('    mprotect((void *)BBLIT_BLOB_BASE, BBLIT_CODE_END - BBLIT_BLOB_BASE,')
     body.append('             PROT_READ | PROT_EXEC);')
+    body.append('    /* Two phases: slots sit 4 bytes apart, so an in-place 8-byte')
+    body.append('     * widening write clobbers the next slot\'s original value')
+    body.append('     * (measured: 0x4ac30c\'s write zeroed 0x4ac310, whose needle')
+    body.append('     * read back NULL and crashed strstr in sysinfo_cpu_detect).')
+    body.append('     * Snapshot every original dword first, then write back. */')
+    body.append('    static data_u32 widen_snap[sizeof bblit_ptr_slots / sizeof bblit_ptr_slots[0]];')
+    body.append('    for (unsigned i = 0; i < sizeof bblit_ptr_slots / sizeof bblit_ptr_slots[0]; i++)')
+    body.append('        widen_snap[i] = *(volatile data_u32 *)(uintptr_t)bblit_ptr_slots[i];')
     body.append('    for (unsigned i = 0; i < sizeof bblit_ptr_slots / sizeof bblit_ptr_slots[0]; i++) {')
     body.append('        uintptr_t a = bblit_ptr_slots[i];')
     body.append('        /* original 4-byte slot value zero-extended into an 8-byte pointer */')
     body.append('        *(void *volatile *)a =')
-    body.append('            (void *)(uintptr_t)*(volatile data_u32 *)a;')
+    body.append('            (void *)(uintptr_t)widen_snap[i];')
     body.append('    }')
     body.append('}')
 
@@ -463,7 +486,7 @@ def main():
         f.write('\n'.join(body) + '\n')
 
     print(f'{n} data addresses declared, {nstr} string labels, '
-          f'{nfn} trampolines, {len(slots)} pointer slots, {nword} non-zero blob words')
+          f'{nfn} trampolines, {len(slots)} pointer slots ({nskip} skipped: live high half), {nword} non-zero blob words')
 
 if __name__ == '__main__':
     main()

@@ -14,6 +14,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/stat.h>
+#include <sys/mman.h>
+#ifndef MAP_32BIT
+#define MAP_32BIT 0x40
+#endif
 #include <ctype.h>
 
 /* ---- process / CRT ---- */
@@ -116,12 +120,74 @@ HANDLE HeapCreate(DWORD flags, SIZE_T init, SIZE_T max)
     if (!g_heaps[i].base) { g_heaps[i].base = (void *)(uintptr_t)(0x1000 + i); return g_heaps[i].base ? g_heaps[i].base : 0; }
   return 0; }
 BOOL HeapDestroy(HANDLE h) { (void)h; return 1; }
+/* GetVersion (kernel32): the CRT startup reads the Windows version word.
+ * Report Win95 (4.0, platform 1) to match the GetVersionExA stub. */
+DWORD GetVersion(void) { return 0x0A040001u; }
+/* VirtualAlloc reserve registry: fixed commits are only honoured inside a
+ * live reserve (see VirtualAlloc). */
+static struct { void *base; size_t len; } bblit_reserves[16];
+static int bblit_in_reserve(void *addr, size_t len)
+{
+    for (unsigned i = 0; i < sizeof bblit_reserves / sizeof bblit_reserves[0]; i++) {
+        uintptr_t b = (uintptr_t)bblit_reserves[i].base, l = bblit_reserves[i].len;
+        if (b && (uintptr_t)addr >= b && (uintptr_t)addr + len <= b + l) return 1;
+    }
+    return 0;
+}
 LPVOID HeapAlloc(HANDLE h, DWORD flags, SIZE_T n)
 { (void)h; void *p = malloc(n); if (p && (flags & 8)) memset(p, 0, n); return p; }
-BOOL HeapFree(HANDLE h, DWORD flags, LPVOID p) { (void)h; (void)flags; free(p); return 1; }
+BOOL HeapFree(HANDLE h, DWORD flags, LPVOID p)
+{ (void)h; (void)flags; if (!p) return 0;
+  /* arena metadata blocks live in VirtualAlloc reserves, not the heap:
+   * freeing those with free() would abort, so let them leak instead. */
+  if (bblit_in_reserve(p, 1)) return 1;
+  free(p); return 1; }
 void * VirtualAlloc(void *addr, size_t n, uint32_t type, uint32_t prot)
-{ (void)addr; (void)prot; (void)type; return calloc(1, n); }
-BOOL VirtualFree(LPVOID addr, SIZE_T n, DWORD type) { (void)n; (void)type; free(addr); return 1; }
+{
+  /* MEM_COMMIT|MEM_RESERVE (0x2000|0x1000) with a NULL address backs the
+   * VC6 sub-allocator arenas: 4 MiB + 64 KiB per arena here, so mmap the
+   * zeroed pages for real instead of calloc (the 64 KiB commit lands at a
+   * different address than the arena base and the old calloc could not
+   * provide that).  MAP_32BIT keeps arenas below 2 GiB so the allocator's
+   * 32-bit index math ((int)/(uint) casts in FUN_00452380/4523e0/452680)
+   * stays exact, exactly as on x86.  A fixed commit is only honoured
+   * inside a live reserve; anything else fails like Windows (committing
+   * unreserved pages is an error there).  That matters because the growth
+   * path in FUN_00452440 occasionally derives a scratch-table address that
+   * must fail so the caller falls back to HeapAlloc (a blind MAP_FIXED
+   * would clobber live mappings instead). */
+  (void)type; (void)prot;
+  size_t pagesz = (size_t)sysconf(_SC_PAGESIZE);
+  size_t len = (n + pagesz - 1) & ~(pagesz - 1);
+  if (addr) {
+    if (!bblit_in_reserve(addr, len)) return 0;
+    void *p = mmap(addr, len, PROT_READ | PROT_WRITE,
+                   MAP_FIXED | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    return (p == MAP_FAILED) ? 0 : p;
+  }
+  void *p = mmap(0, len, PROT_READ | PROT_WRITE,
+                 MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
+  if (p == MAP_FAILED)
+    p = mmap(0, len, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  if (p == MAP_FAILED) return 0;
+  for (unsigned i = 0; i < sizeof bblit_reserves / sizeof bblit_reserves[0]; i++)
+    if (!bblit_reserves[i].base) { bblit_reserves[i].base = p; bblit_reserves[i].len = len; break; }
+  return p;
+}
+BOOL VirtualFree(LPVOID addr, SIZE_T n, DWORD type)
+{
+  /* MEM_RELEASE (0x8000): drop the pages when the size is known, and
+   * always drop the reserve record so later commits there fail closed. */
+  size_t pagesz = (size_t)sysconf(_SC_PAGESIZE);
+  if (!addr) return 0;
+  for (unsigned i = 0; i < sizeof bblit_reserves / sizeof bblit_reserves[0]; i++)
+    if (bblit_reserves[i].base == addr) bblit_reserves[i].base = 0;
+  if (type == 0x8000 && n) {
+    size_t len = (n + pagesz - 1) & ~(pagesz - 1);
+    return munmap(addr, len) == 0;
+  }
+  return 1;
+}
 void GlobalMemoryStatus(LPMEMORYSTATUS ms) { memset(ms, 0, sizeof(MEMORYSTATUS)); ms->dwLength = sizeof(MEMORYSTATUS); ms->dwTotalPhys = 256u << 20; ms->dwAvailPhys = 128u << 20; }
 
 /* ---- registry (installation_path lookup is the game's startup gate) ---- */

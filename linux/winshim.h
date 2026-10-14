@@ -340,6 +340,9 @@ HANDLE GetStdHandle(int);
 BOOL GetStringTypeA(LCID, DWORD, LPCSTR, int, LPWORD);
 void GetSystemInfo(SYSTEM_INFO *);
 void GlobalMemoryStatus(MEMORYSTATUS *);
+/* GetVersion (kernel32); the CRT startup splits this word into the
+ * DAT_004b1e20..2c version bytes.  Report Win95 4.0 to match GetVersionExA. */
+DWORD GetVersion(void);
 LPVOID HeapAlloc(HANDLE, DWORD, SIZE_T);
 HANDLE HeapCreate(DWORD, SIZE_T, SIZE_T);
 BOOL HeapDestroy(HANDLE);

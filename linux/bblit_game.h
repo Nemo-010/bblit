@@ -425,7 +425,7 @@ void FUN_004522b0(void);
 int FUN_00452380(undefined *param_1,undefined4 *param_2,uint *param_3);
 void FUN_004523e0(int param_1,int param_2,byte *param_3);
 int * FUN_00452440(uint param_1);
-int FUN_00452680(int *param_1,uint param_2,uint param_3);
+int FUN_00452680(byte *param_1,uint param_2,uint param_3);
 undefined4 FUN_00452820(void);
 void FUN_00452870(void);
 undefined1 * FUN_004529f0(undefined4 *param_1,undefined1 *param_2,int param_3,int param_4);

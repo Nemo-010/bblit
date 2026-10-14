@@ -10,3 +10,4 @@
 # python bytecode
 __pycache__/
 linux/build/
+linux/build_asan/

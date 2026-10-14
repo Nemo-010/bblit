@@ -42737,32 +42737,18 @@ static const struct { unsigned from; void *to; } bblit_thunks[] = {
 };
 
 static const unsigned bblit_ptr_slots[] = {
-  0x0045f2a0,
-  0x0045f344,
   0x00467730,
   0x00467734,
   0x00467738,
-  0x0046773c,
-  0x00468750,
   0x0046928c,
-  0x0046aec0,
   0x0046af70,
-  0x004abf90,
   0x004ac014,
   0x004ac018,
   0x004ac01c,
-  0x004ac020,
   0x004ac09c,
   0x004ac0a0,
   0x004ac0a4,
-  0x004ac0a8,
-  0x004ac0b8,
-  0x004ac0c4,
   0x004ac0cc,
-  0x004ac0d8,
-  0x004ac0e0,
-  0x004ac0e8,
-  0x004ac0f0,
   0x004ac0f8,
   0x004ac0fc,
   0x004ac100,
@@ -42772,32 +42758,15 @@ static const unsigned bblit_ptr_slots[] = {
   0x004ac110,
   0x004ac114,
   0x004ac118,
-  0x004ac11c,
-  0x004ac12c,
   0x004ac30c,
-  0x004ac310,
-  0x004ac550,
-  0x004ac6e0,
-  0x004ad380,
-  0x004ae098,
-  0x004ae5fc,
-  0x004ae620,
   0x004ae8e0,
-  0x004ae8e4,
-  0x004b0900,
   0x004b0908,
   0x004b090c,
   0x004b0910,
   0x004b0914,
   0x004b0918,
-  0x004b091c,
   0x004b0a90,
   0x004b0a94,
-  0x004b0a98,
-  0x004b0ca8,
-  0x004b0dfe,
-  0x004b0e50,
-  0x004b10f8,
   0x004b18c0,
   0x004b18c4,
   0x004b18c8,
@@ -43143,10 +43112,18 @@ void bblit_port_init(void)
     }
     mprotect((void *)BBLIT_BLOB_BASE, BBLIT_CODE_END - BBLIT_BLOB_BASE,
              PROT_READ | PROT_EXEC);
+    /* Two phases: slots sit 4 bytes apart, so an in-place 8-byte
+     * widening write clobbers the next slot's original value
+     * (measured: 0x4ac30c's write zeroed 0x4ac310, whose needle
+     * read back NULL and crashed strstr in sysinfo_cpu_detect).
+     * Snapshot every original dword first, then write back. */
+    static data_u32 widen_snap[sizeof bblit_ptr_slots / sizeof bblit_ptr_slots[0]];
+    for (unsigned i = 0; i < sizeof bblit_ptr_slots / sizeof bblit_ptr_slots[0]; i++)
+        widen_snap[i] = *(volatile data_u32 *)(uintptr_t)bblit_ptr_slots[i];
     for (unsigned i = 0; i < sizeof bblit_ptr_slots / sizeof bblit_ptr_slots[0]; i++) {
         uintptr_t a = bblit_ptr_slots[i];
         /* original 4-byte slot value zero-extended into an 8-byte pointer */
         *(void *volatile *)a =
-            (void *)(uintptr_t)*(volatile data_u32 *)a;
+            (void *)(uintptr_t)widen_snap[i];
     }
 }
