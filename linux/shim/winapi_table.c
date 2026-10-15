@@ -69,9 +69,15 @@ static FILE * stdh(int fd) { switch (fd) { case 0: return stdin; case 1: return 
 /* CRT-level std handles (0/1/2, e.g. from the image's handle table) are
  * small ints, not our FILE* HANDLEs; route them to stdio (observed: the
  * sysinfo flush wrote through (FILE*)1 and faulted in fwrite). */
+static FILE *fd_file[1024];
+void bblit_fd_register(int fd, FILE *f)
+{ if (0 <= fd && fd < 1024) fd_file[fd] = f; }
+void bblit_fd_forget_handle(FILE *f)
+{ for (int i = 0; i < 1024; i++) if (fd_file[i] == f) fd_file[i] = 0; }
 static FILE *handle_file(HANDLE h)
 { uintptr_t v = (uintptr_t)h;
   if (v <= 2) return stdh((int)v);
+  if (v < 1024 && fd_file[v]) return fd_file[v];
   return (FILE *)h; }
 BOOL SetStdHandle(int which, HANDLE h) { (void)which; (void)h; return 1; }
 HANDLE GetStdHandle(int which) { return (HANDLE)stdh(which == -10 ? 0 : which == -11 ? 1 : 2); }
@@ -91,7 +97,118 @@ BOOL ReadConsoleInputA(HANDLE h, PINPUT_RECORD rec, DWORD n, LPDWORD read)
 void SetHandleCount(UINT n) { (void)n; }
 uint32_t GetHandleCount(void) { return 0; }
 
+const char *bblit_install_path(void);
 /* ---- files ---- */
+#include <dirent.h>
+/* Windows->Linux path resolution: the game opens CD paths like
+ * `q:\Datas\BZE\L_SARUN.BZE` and relative `..\BZE\x`, with the
+ * on-disc case often differing (`L_SArun_0.bze`).  Normalize
+ * separators, strip the drive letter, try install-dir and cwd,
+ * then fall back to a case-insensitive component walk. */
+static char resolve_buf[4096];
+static int try_path(const char *p)
+{ return access(p, 0) == 0; }
+static int resolve_ci(const char *base, const char *rel, char *out, size_t n)
+{
+    char tmp[4096];
+    snprintf(tmp, sizeof tmp, "%s", base);
+    const char *r = rel;
+    while (*r) {
+        while (*r == '/') r++;
+        if (!*r) break;
+        const char *e = strchr(r, '/');
+        size_t L = e ? (size_t)(e - r) : strlen(r);
+        char comp[256];
+        if (L == 2 && r[0] == '.' && r[1] == '.') {
+            size_t tl = strlen(tmp);
+            while (tl > 0 && tmp[tl - 1] == '/') tmp[--tl] = 0;
+            /* tmp may be empty (relative ".." past start): never write
+             * through a string literal (crashed on "/" rodata). */
+            if (tl > 0) {
+                char *s2 = strrchr(tmp, '/');
+                if (s2) *s2 = 0;
+                else tmp[0] = 0;
+            }
+            r += L;
+            continue;
+        }
+        if (L >= sizeof comp) return 0;
+        memcpy(comp, r, L);
+        comp[L] = 0;
+        r += L;
+        if (!strcmp(comp, ".") || !*comp) continue;
+        DIR *d = opendir(*tmp ? tmp : ".");
+        if (!d) return 0;
+        int found = 0;
+        struct dirent *de;
+        while ((de = readdir(d))) {
+            if (!strcasecmp(de->d_name, comp)) {
+                size_t tl = strlen(tmp);
+                snprintf(tmp + tl, sizeof tmp - tl, "%s%s", tl ? "/" : "", de->d_name);
+                found = 1;
+                break;
+            }
+        }
+        closedir(d);
+        if (!found) return 0;
+    }
+    snprintf(out, n, "%s", tmp);
+    return 1;
+}
+static const char *bblit_resolve_path(const char *name)
+{
+    char norm[4096];
+    size_t j = 0;
+    const char *p = name;
+    if (p[0] && p[1] == ':') p += 2;  /* strip drive letter */
+    for (; *p && j + 1 < sizeof norm; p++)
+        norm[j++] = (*p == '\\') ? '/' : *p;
+    norm[j] = 0;
+    /* A leading slash always came from a backslash or drive strip: the
+     * game has no true absolute Linux paths, so treat as relative. */
+    const char *rel = norm[0] == '/' ? norm + 1 : norm;
+    if (!*rel) return norm;
+    /* Candidate bases: CWD-relative, the install dir and its ancestors
+     * (CD paths are disc-rooted: q:\Datas\BZE vs install .../Datas/bin),
+     * plus the absolute form for good measure. */
+    static char ancestors[4][4096];
+    static int aninit = 0;
+    const char *inst = bblit_install_path();
+    if (!aninit) {
+        aninit = 1;
+        snprintf(ancestors[0], sizeof ancestors[0], "%s", inst);
+        for (int i = 1; i < 4; i++) {
+            snprintf(ancestors[i], sizeof ancestors[i], "%s", ancestors[i - 1]);
+            char *s2 = strrchr(ancestors[i], '/');
+            if (s2 && s2 != ancestors[i]) *s2 = 0;
+        }
+    }
+    /* Exe directory (BBLIT_INSTALL) first per operator: no CD check,
+     * assets live next to the game exe. */
+    const char *bases[7];
+    bases[0] = inst;
+    bases[1] = ancestors[1];
+    bases[2] = ancestors[2];
+    bases[3] = ancestors[3];
+    bases[4] = "";
+    bases[5] = ".";
+    bases[6] = "/";
+    for (int i = 0; i < 7; i++) {
+        if (i == 6) {
+            snprintf(resolve_buf, sizeof resolve_buf, "/%s", rel);
+        } else if (!*bases[i]) {
+            snprintf(resolve_buf, sizeof resolve_buf, "%s", rel);
+        } else {
+            snprintf(resolve_buf, sizeof resolve_buf, "%s/%s", bases[i], rel);
+        }
+        if (try_path(resolve_buf)) return resolve_buf;
+        const char *bb = *bases[i] ? bases[i] : (i == 6 ? "/" : ".");
+        if (resolve_ci(bb, rel, resolve_buf, sizeof resolve_buf))
+            return resolve_buf;
+    }
+    snprintf(resolve_buf, sizeof resolve_buf, "%s", norm);
+    return resolve_buf;
+}
 /* File opens come through the CRT _sopen wrapper in the image; disp is one
  * of the CREATE or OPEN constants. Map to fopen modes. */
 HANDLE CreateFileA(LPCSTR name, DWORD access, DWORD share,
@@ -100,7 +217,8 @@ HANDLE CreateFileA(LPCSTR name, DWORD access, DWORD share,
   if (!name || (uintptr_t)name < 0x10000 || (uintptr_t)name >= 0x7ffffffdfffcUL
       || ((uintptr_t)name >> 47) != ((uintptr_t)name >> 63))
     return INVALID_HANDLE_VALUE;
-  fprintf(stderr, "[cf] %s disp=%u\n", name, (unsigned)disp);
+  const char *rpath = bblit_resolve_path(name);
+  fprintf(stderr, "[cf] %s -> %s disp=%u\n", name, rpath, (unsigned)disp);
   const char *mode;
   switch (disp) {
   case CREATE_NEW:      mode = "wb";  break;   /* fail if exists: close enough for the game's use */
@@ -110,11 +228,16 @@ HANDLE CreateFileA(LPCSTR name, DWORD access, DWORD share,
   case TRUNCATE_EXISTING: mode = "wb"; break;
   default:              mode = "rb";  break;
   }
-  FILE *f = fopen(name, mode);
+  FILE *f = fopen(rpath, mode);
   return f ? (HANDLE)f : INVALID_HANDLE_VALUE; }
 BOOL ReadFile(HANDLE h, LPVOID buf, DWORD n, LPDWORD read, void *over)
 { (void)over; if (!h || h == INVALID_HANDLE_VALUE) return 0;
-  size_t r = fread(buf, 1, n, handle_file(h)); if (read) *read = (DWORD)r; return r == n; }
+  FILE *f = handle_file(h);
+  size_t r = fread(buf, 1, n, f);
+  if (getenv("BBLIT_DEBUG") && r != n)
+    fprintf(stderr, "[fread] h=%p n=%u r=%lu eof=%d err=%d pos=%ld\n",
+      h, (unsigned)n, (unsigned long)r, feof(f), ferror(f), ftell(f));
+  if (read) *read = (DWORD)r; return r == n; }
 BOOL WriteFile(HANDLE h, LPCVOID buf, DWORD n, LPDWORD w, void *over)
 { (void)over; if (!h || h == INVALID_HANDLE_VALUE) return 0;
   size_t r = fwrite(buf, 1, n, handle_file(h)); if (w) *w = (DWORD)r; return r == n; }
@@ -125,7 +248,10 @@ DWORD SetFilePointer(HANDLE h, LONG dist, LPLONG hi, DWORD how)
 BOOL CloseHandle(HANDLE h)
 { if (!h || h == INVALID_HANDLE_VALUE) return 0;
   if (h == (HANDLE)0xffffffffffffffffull || h == (HANDLE)0xfffffffffffffffeull) return 1;
-  fclose((FILE *)h); return 1; }
+  { FILE *f = handle_file(h);
+    if ((uintptr_t)h < 1024) bblit_fd_register((int)(uintptr_t)h, 0);
+    else bblit_fd_forget_handle(f);
+    if (f) fclose(f); return 1; } }
 DWORD GetCurrentDirectoryA(DWORD n, LPSTR buf) { return getcwd(buf, n) ? (DWORD)strlen(buf) : 0; }
 BOOL SetCurrentDirectoryA(LPCSTR p) { return chdir(p) == 0; }
 BOOL SetEnvironmentVariableA(LPCSTR k, LPCSTR v) { return setenv(k, v ? v : "", 1) == 0; }
@@ -151,13 +277,40 @@ static int bblit_in_reserve(void *addr, size_t len)
     }
     return 0;
 }
+/* Heap blocks land in 4-byte image slots across the game, so every
+ * block must sit below 4 GiB.  glibc malloc mmaps large requests
+ * anywhere (observed: 4 MiB sound buffer past 4 GiB, truncated in
+ * DAT_0052fd00, wild write at +0x1000a) -- and small ones too (observed:
+ * stbuf's 0x1000 print buffer at low32 0x86df5b30, high bit set, fault
+ * via sign-extension in fputc; DAT_004b0904 is pristine 0x1e0 forever,
+ * only 2 reads and no writes in the image, so 0x1000 always takes this
+ * HeapAlloc path).  All requests go through 32-bit mmap, page-rounded. */
+#define HEAP_MMAPS 4096
+static struct { void *base; size_t len; } heap_mmaps[HEAP_MMAPS];
 LPVOID HeapAlloc(HANDLE h, DWORD flags, SIZE_T n)
-{ (void)h; void *p = malloc(n); if (p && (flags & 8)) memset(p, 0, n); return p; }
+{ (void)h;
+  { size_t pagesz = (size_t)sysconf(_SC_PAGESIZE);
+    size_t len = ((n ? n : 1) + pagesz - 1) & ~(pagesz - 1);
+    void *p = mmap(0, len, PROT_READ | PROT_WRITE,
+                   MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
+    if (p == MAP_FAILED)
+      p = mmap(0, len, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (p == MAP_FAILED) return 0;
+    if ((uintptr_t)p > 0xfffffffful) { munmap(p, len); return 0; }
+    if (flags & 8) memset(p, 0, len);
+    for (unsigned i = 0; i < HEAP_MMAPS; i++)
+      if (!heap_mmaps[i].base) { heap_mmaps[i].base = p; heap_mmaps[i].len = len; break; }
+    return p; } }
 BOOL HeapFree(HANDLE h, DWORD flags, LPVOID p)
 { (void)h; (void)flags; if (!p) return 0;
   /* arena metadata blocks live in VirtualAlloc reserves, not the heap:
    * freeing those with free() would abort, so let them leak instead. */
   if (bblit_in_reserve(p, 1)) return 1;
+  for (unsigned i = 0; i < HEAP_MMAPS; i++)
+    if (heap_mmaps[i].base == p) {
+      heap_mmaps[i].base = 0;
+      return munmap(p, heap_mmaps[i].len) == 0;
+    }
   free(p); return 1; }
 void * VirtualAlloc(void *addr, size_t n, uint32_t type, uint32_t prot)
 {
@@ -217,7 +370,7 @@ static const char *g_install_path_marker = 0;
 #define g_install_path bblit_install_path()
 LONG RegOpenKeyExA(HKEY h, LPCSTR sub, DWORD res, REGSAM access, PHKEY out)
 { (void)h; (void)res; (void)access;
-  if (sub && strcmp(sub, "Software\\Infogrames\\Bugs Bunny Lost In Time") == 0) { *out = (HKEY)0x20000; return 0u; }
+  if (sub && strcmp(sub, "Software\\Infogrames\\Bugs Bunny Lost In Time") == 0) { if (!out) return 1; *out = (HKEY)0x20000; return 0u; }
   return 2u; }                  /* STUB-DIVERGENCE: static key */
 LONG RegQueryValueExA(HKEY k, LPCSTR name, LPDWORD res, LPDWORD type,
                                   LPBYTE buf, LPDWORD len)
@@ -304,7 +457,10 @@ HWND GetForegroundWindow(void) { return 0; }
 HWND SetFocus(HWND h) { (void)h; return h; }
 HWND FindWindowA(LPCSTR cls, LPCSTR title) { (void)cls; (void)title; return 0; }
 int MessageBoxA(HWND h, LPCSTR text, LPCSTR cap, UINT type)
-{ (void)h; (void)type; fprintf(stderr, "%s: %s\n", cap ? cap : "", text ? text : ""); return 1; }
+/* No GUI yet: log the box and answer IDCANCEL so file-missing
+ * retries abort instead of spinning (observed: SARUN retry loop
+ * on garbage names when the level file is absent). */
+{ (void)h; (void)type; fprintf(stderr, "%s: %s\n", cap ? cap : "", text ? text : ""); return 2; }
 void PostQuitMessage(int code) { exit(code); }
 BOOL PeekMessageA(LPMSG msg, HWND h, UINT lo, UINT hi, UINT remove)
 { (void)msg; (void)h; (void)lo; (void)hi; (void)remove; return 0; }  /* STUB-DIVERGENCE */
@@ -336,13 +492,13 @@ UINT SetErrorMode(UINT m) { (void)m; return 0; }
 HRESULT CoInitialize(LPVOID p) { (void)p; return 0; }         /* S_FALSE->0 ok */
 void CoUninitialize(void) {}
 HRESULT CoCreateInstance(const void *cls, void *outer, DWORD ctx, const void *iid, void **out)
-{ (void)cls; (void)outer; (void)ctx; (void)iid; *out = 0; return 0x80004005u; }  /* E_NOINTERFACE */
+{ (void)cls; (void)outer; (void)ctx; (void)iid; (void)out; return 0x80004005u; }  /* E_NOINTERFACE */
 HRESULT DirectDrawEnumerateA(void *cb, LPVOID ctx)
 { (void)cb; (void)ctx; return 1; }   /* DDERR_GENERIC: no ddraw devices */
 HRESULT DirectDrawCreate(void *guid, void **dd, void *outer)
-{ (void)guid; (void)outer; *dd = 0; return 1; }   /* DDERR_GENERIC */
+{ (void)guid; (void)outer; *dd = ddraw_fake_object(); return 0; }  /* DD_OK */
 HRESULT DirectSoundCreate(void *dev, void **ds, void *outer)
-{ (void)dev; (void)outer; *ds = 0; return 1; }    /* DSERR_NODRIVER */
+{ (void)dev; (void)outer; (void)ds; return 1; }   /* DSERR_NODRIVER */
 
 /* ---- loader / string conversion ---- */
 #include <dlfcn.h>
@@ -381,8 +537,12 @@ FARPROC GetProcAddress(HMODULE m, LPCSTR name)
      * gl* names but not wgl*; glX* covers the context/swap ones, and the font
      * helpers have no GLX equivalent, so those resolve to a no-op stub. */
     if (getenv("BBLIT_DEBUG")) { write(2, "[gpaddr] ", 9); write(2, name, name ? strlen(name) : 5); write(2, "\n", 1); }
+    {
+        FARPROC w = (FARPROC)wgl_wrapper(name);
+        if (w) return w;
+    }
     void *s = dlsym((void *)m, name);
-    if (s) return (FARPROC)s;
+    if (s) return (FARPROC)gl_trampoline(s);
     static char wglbuf[64];
     if (strncmp(name, "wgl", 3) == 0) {
         const char *map = 0;
@@ -399,10 +559,10 @@ FARPROC GetProcAddress(HMODULE m, LPCSTR name)
         else if (!strcmp(name, "wglDescribePixelFormat")) map = 0;
         else if (!strcmp(name, "wglGetPixelFormat")) map = 0;
         else if (!strcmp(name, "wglShareLists")) map = "glXCreateContext";
-        if (map) { s = dlsym(RTLD_DEFAULT, map); if (s) return (FARPROC)s; }
+        if (map) { s = dlsym(RTLD_DEFAULT, map); if (s) return (FARPROC)gl_trampoline(s); }
         return (FARPROC)wgl_noop;   /* STUB-DIVERGENCE: font/layer helpers */
     }
-    return (FARPROC)dlsym((void *)m, name);
+    return (FARPROC)gl_trampoline(dlsym((void *)m, name));
 }
 int MultiByteToWideChar(UINT cp, DWORD flags, LPCSTR src, int slen, wchar_t *dst, int dlen)
 {

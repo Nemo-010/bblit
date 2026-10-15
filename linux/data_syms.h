@@ -18,7 +18,7 @@ extern data_u64 bblit_image_blob[BBLIT_BLOB_WORDS];
  * image slots (see the note at their sites below). */
 extern void *bblit_arena_sentinel[6];
 /* LP64 side-table cells for conflict slots (see above). */
-extern data_u32 *bblit_slot_cells[28];
+extern data_u32 *bblit_slot_cells[31];
 void bblit_port_init(void);
 
 /* ---- data symbol views (all at original addresses) ---- */
@@ -431,9 +431,14 @@ void bblit_port_init(void);
 #define DAT_004b1ca8 (*(data_u32 **)0x004b1ca8ul) /* DAT_004b1ca8 */
 #define DAT_004b1cac (*(data_u32 **)0x004b1cacul) /* DAT_004b1cac */
 #define DAT_004b1cb0 (*(data_u32 **)0x004b1cb0ul) /* DAT_004b1cb0 */
-#define DAT_004b1cb4 (*(data_u32 **)0x004b1cb4ul) /* DAT_004b1cb4 */
-#define DAT_004b1cb8 (*(data_u32 **)0x004b1cb8ul) /* DAT_004b1cb8 */
-#define DAT_004b1cbc (*(data_u32 **)0x004b1cbcul) /* DAT_004b1cbc */
+/* LP64: 1cb4/1cb8/1cbc sit at 4-byte stride with 1cb8+1cbc widened
+ * in place to 8 bytes, so every access tears a neighbor (observed:
+ * 1cb8 read back doubled 0x4200000042000000 after the 1cbc copy,
+ * fault in the payload read).  Side-table cells carry exact values.
+ * (1cb4's 8-byte macro read picked up 1cb8's low half the same way.) */
+#define DAT_004b1cb4 (*(data_u32 **)&bblit_slot_cells[28]) /* DAT_004b1cb4: cell (overlap, see note) */
+#define DAT_004b1cb8 (*(data_u32 **)&bblit_slot_cells[29]) /* DAT_004b1cb8: cell */
+#define DAT_004b1cbc (*(data_u32 **)&bblit_slot_cells[30]) /* DAT_004b1cbc: cell */
 #define DAT_004b1cc0 (*(data_u32 *)0x004b1cc0ul) /* DAT_004b1cc0 */
 #define DAT_004b1cc4 (*(data_u32 *)0x004b1cc4ul) /* DAT_004b1cc4 */
 #define DAT_004b1cc8 (*(data_u32 *)0x004b1cc8ul) /* DAT_004b1cc8 */
@@ -995,10 +1000,10 @@ void bblit_port_init(void);
 #define DAT_004efb8c (*(data_u32 **)0x004efb8cul) /* DAT_004efb8c */
 #define DAT_0052fbc0 (*(data_u32 *)0x0052fbc0ul) /* DAT_0052fbc0 */
 #define DAT_0052fce0 (*(data_u32 *)0x0052fce0ul) /* DAT_0052fce0 */
-#define DAT_0052fcf4 (*(data_u32 **)0x0052fcf4ul) /* 0052fcf4 */
-#define _DAT_0052fcf4 (*(data_u32 **)0x0052fcf4ul) /* 0052fcf4 */
-#define _DAT_0052fcf8 (*(data_u32 **)0x0052fcf8ul) /* 0052fcf8 */
-#define _DAT_0052fcfc (*(data_u32 **)0x0052fcfcul) /* 0052fcfc */
+#define DAT_0052fcf4 (*(data_u32 *)0x0052fcf4ul) /* 0052fcf4 */
+#define _DAT_0052fcf4 (*(data_u32 *)0x0052fcf4ul) /* 0052fcf4 */
+#define _DAT_0052fcf8 (*(data_u32 *)0x0052fcf8ul) /* 0052fcf8 */
+#define _DAT_0052fcfc (*(data_u32 *)0x0052fcfcul) /* 0052fcfc */
 #define DAT_0052fd00 (*(data_u32 *)0x0052fd00ul) /* DAT_0052fd00 */
 #define DAT_0052fd20 (*(data_u32 **)0x0052fd20ul) /* 0052fd20 */
 #define _DAT_0052fd20 (*(data_u32 **)0x0052fd20ul) /* 0052fd20 */
@@ -1549,5 +1554,118 @@ void bblit_port_init(void);
 #ifdef __cplusplus
 }
 #endif
+
+/* GL dispatch redirect (see shim/gl_wgl.c): these image dwords hold
+ * 4-byte proc addresses at 4-byte stride; an 8-byte code* read spans
+ * two slots.  The side table carries zero-extended entries. */
+extern void *gl_proc_side[];
+#undef DAT_007c63c0
+#define DAT_007c63c0 ((code)gl_proc_side[1])
+#undef DAT_007c6368
+#define DAT_007c6368 ((code)gl_proc_side[5])
+#undef DAT_007c63c8
+#define DAT_007c63c8 ((code)gl_proc_side[7])
+#undef DAT_007c6318
+#define DAT_007c6318 ((code)gl_proc_side[10])
+#undef DAT_007c6274
+#define DAT_007c6274 ((code)gl_proc_side[12])
+#undef DAT_007c6574
+#define DAT_007c6574 ((code)gl_proc_side[59])
+#undef DAT_007c90a8
+#define DAT_007c90a8 ((code)gl_proc_side[60])
+#undef DAT_007c9098
+#define DAT_007c9098 ((code)gl_proc_side[62])
+#undef DAT_007c639c
+#define DAT_007c639c ((code)gl_proc_side[63])
+#undef DAT_007c632c
+#define DAT_007c632c ((code)gl_proc_side[72])
+#undef DAT_007c6614
+#define DAT_007c6614 ((code)gl_proc_side[102])
+#undef DAT_007c6304
+#define DAT_007c6304 ((code)gl_proc_side[117])
+#undef DAT_007c9070
+#define DAT_007c9070 ((code)gl_proc_side[128])
+#undef DAT_007c9090
+#define DAT_007c9090 ((code)gl_proc_side[157])
+#undef DAT_007c90ac
+#define DAT_007c90ac ((code)gl_proc_side[174])
+#undef DAT_007c946c
+#define DAT_007c946c ((code)gl_proc_side[189])
+#undef DAT_007c6354
+#define DAT_007c6354 ((code)gl_proc_side[200])
+#undef DAT_007c62d4
+#define DAT_007c62d4 ((code)gl_proc_side[253])
+#undef DAT_007c90cc
+#define DAT_007c90cc ((code)gl_proc_side[301])
+#undef DAT_007c62c0
+#define DAT_007c62c0 ((code)gl_proc_side[302])
+#undef DAT_007c660c
+#define DAT_007c660c ((code)gl_proc_side[335])
+#undef DAT_007c6584
+#define DAT_007c6584 ((code)gl_proc_side[336])
+#undef DAT_007c934c
+#define DAT_007c934c ((code)gl_proc_side[338])
+#undef DAT_007c661c
+#define DAT_007c661c ((code)gl_proc_side[340])
+#undef DAT_007c63b8
+#define DAT_007c63b8 ((code)gl_proc_side[349])
+#undef DAT_007c637c
+#define DAT_007c637c ((code)gl_proc_side[352])
+
+/* Callback redirect (see shim/gl_wgl.c cb1a). */
+struct cb1a_side {
+    code f004b1a5c;
+    code f004b1a60;
+    code f004b1a64;
+    code f004b1a68;
+    code f004b1a74;
+    code f004b1a78;
+    code f004b1a7c;
+    code f004b1a80;
+    data_u32 * p004b1a84;
+    data_u32 * p004b1a88;
+    code f004b1a8c;
+    code f004b1a90;
+    data_u32 * p004b1a94;
+    data_u32 * p004b1a98;
+    code f004b1a9c;
+    data_u32 * p004b1aa0;
+    code f004b1aa4;
+};
+extern struct cb1a_side cb1a;
+#undef DAT_004b1a5c
+#define DAT_004b1a5c (*((code *)&cb1a.f004b1a5c))
+#undef DAT_004b1a60
+#define DAT_004b1a60 (*((code *)&cb1a.f004b1a60))
+#undef DAT_004b1a64
+#define DAT_004b1a64 (*((code *)&cb1a.f004b1a64))
+#undef DAT_004b1a68
+#define DAT_004b1a68 (*((code *)&cb1a.f004b1a68))
+#undef DAT_004b1a74
+#define DAT_004b1a74 (*((code *)&cb1a.f004b1a74))
+#undef DAT_004b1a78
+#define DAT_004b1a78 (*((code *)&cb1a.f004b1a78))
+#undef DAT_004b1a7c
+#define DAT_004b1a7c (*((code *)&cb1a.f004b1a7c))
+#undef DAT_004b1a80
+#define DAT_004b1a80 (*((code *)&cb1a.f004b1a80))
+#undef _DAT_004b1a84
+#define _DAT_004b1a84 (*((data_u32 **)&cb1a.p004b1a84))
+#undef _DAT_004b1a88
+#define _DAT_004b1a88 (*((data_u32 **)&cb1a.p004b1a88))
+#undef DAT_004b1a8c
+#define DAT_004b1a8c (*((code *)&cb1a.f004b1a8c))
+#undef DAT_004b1a90
+#define DAT_004b1a90 (*((code *)&cb1a.f004b1a90))
+#undef _DAT_004b1a94
+#define _DAT_004b1a94 (*((data_u32 **)&cb1a.p004b1a94))
+#undef _DAT_004b1a98
+#define _DAT_004b1a98 (*((data_u32 **)&cb1a.p004b1a98))
+#undef DAT_004b1a9c
+#define DAT_004b1a9c (*((code *)&cb1a.f004b1a9c))
+#undef _DAT_004b1aa0
+#define _DAT_004b1aa0 (*((data_u32 **)&cb1a.p004b1aa0))
+#undef DAT_004b1aa4
+#define DAT_004b1aa4 (*((code *)&cb1a.f004b1aa4))
 
 #endif

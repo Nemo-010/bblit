@@ -424,6 +424,17 @@ HRESULT DirectDrawCreate(void *lpGuid, void **lplpDD, void *pUnkOuter);
 HRESULT DirectDrawEnumerateA(void *lpCallback, LPVOID lpContext);
 HRESULT DirectSoundCreate(void *lpGuid, void **ppDS, void *pUnkOuter);
 
+/* ---- Linux GL backend (shim/gl_wgl.c) ----
+ * wgl* wrappers backed by EGL surfaceless + Mesa; the game resolves them
+ * through GetProcAddress like on Windows. */
+FARPROC wgl_wrapper(const char *name);
+void *ddraw_fake_object(void);
+int gl_probe_frame(unsigned *checksum);
+void gl_table_sync(void);
+void cb1a_init(void);
+void *gl_trampoline(void *target);
+void bblit_fd_register(int fd, FILE *f);
+
 /* ---- COM interface shims ----
  * The game drives DirectDraw/DirectSound through raw vtable offsets
  * (e.g. (**(code**)*obj + 0x0c)(obj, ...)), so the shim exposes real
