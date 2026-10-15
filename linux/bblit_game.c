@@ -13936,6 +13936,7 @@ undefined4 FUN_004229a0(undefined4 *param_1,undefined4 param_2) {
   undefined4 *puVar7;
   
   sVar4 = 0;
+  if (getenv("BBLIT_DEBUG")) { static int zn = 0; if (zn++ < 3) fprintf(stderr, "[229a0] 1cbc=%p 1cb8=%p 1cd4=%#x\n", (void*)DAT_004b1cbc, (void*)DAT_004b1cb8, (unsigned)DAT_004b1cd4); }
   if (DAT_004b1cbc == DAT_004b1cb8) {
     DAT_004b1cd4 = 0;
   }
@@ -13959,6 +13960,7 @@ undefined4 FUN_004229a0(undefined4 *param_1,undefined4 param_2) {
     param_1 = (undefined4 *)((int)param_1 + 1);
     puVar7 = (undefined4 *)((long)(uintptr_t)puVar7 + 1);
   }
+  if (getenv("BBLIT_DEBUG")) fprintf(stderr, "[229a0] uVar1=%#x src=%p sVar4=%#x\n", uVar1, (void*)param_1, (unsigned)(int)sVar4);
   DAT_004b1cbc = (undefined4 *)((int)DAT_004b1cbc + uVar1);
   DAT_004b1cd4 = DAT_004b1cd4 + uVar1;
   return 1;
@@ -13968,6 +13970,11 @@ undefined4 FUN_004229a0(undefined4 *param_1,undefined4 param_2) {
 /* WARNING: Globals starting with '_' overlap smaller symbols at the same address */
 
 void FUN_00422a40(void) {
+  if (getenv("BBLIT_DEBUG")) { unsigned char *_q = (unsigned char *)(uintptr_t)DAT_004b1cb8;
+    fprintf(stderr, "[22a40] 1ca4=%p 1cb8=%p 1cd4=%#x 1ca8=%p\n", (void*)DAT_004b1ca4, (void*)DAT_004b1cb8, (unsigned)DAT_004b1cd4, (void*)DAT_004b1ca8);
+    fprintf(stderr, "[22a40] 1cb8[0..31]=%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x\n",
+      _q[0],_q[1],_q[2],_q[3],_q[4],_q[5],_q[6],_q[7],_q[8],_q[9],_q[10],_q[11],_q[12],_q[13],_q[14],_q[15],
+      _q[16],_q[17],_q[18],_q[19],_q[20],_q[21],_q[22],_q[23],_q[24],_q[25],_q[26],_q[27],_q[28],_q[29],_q[30],_q[31]); }
   char cVar1;
   undefined1 uVar2;
   char *pcVar3;
@@ -14281,6 +14288,10 @@ void FUN_00422a40(void) {
     iVar8 = DAT_004b1cd4;
     if (DAT_004b1ca4 != 0) {
       for (; iVar8 != 0; iVar8 = iVar8 - iVar15) {
+        { static int wn = 0; if (getenv("BBLIT_DEBUG") && wn++ < 8) {
+            unsigned char *_w = (unsigned char *)(uintptr_t)piVar16;
+            fprintf(stderr, "[walk] pi=%p i8=%#x b8=%02x w10=%04x w12=%04x\n",
+              (void*)piVar16, (unsigned)iVar8, _w[8], _w[10]|(_w[11]<<8), _w[12]|(_w[13]<<8)); } }
         sVar7 = 0;
         if ((*(byte *)(piVar16 + 2) & 8) != 0) {
           sVar7 = (short)piVar16[3];
@@ -18848,7 +18859,8 @@ int FUN_0042e3a0(int *param_1,int param_2,int param_3) {
 
 // ===== FUN_0042e440 @ 0042e440 =====
 undefined4 FUN_0042e440(undefined4 param_1,int param_2) {
-  fprintf(stderr, "[r440] enter fd=%d buf=%x want=%x\n", (int)param_1, (unsigned)(uintptr_t)param_2, (unsigned)DAT_004b3e40);
+  { static int rn = 0; if (getenv("BBLIT_DEBUG") && rn++ < 10) { long _p = lseek((int)param_1, 0, SEEK_CUR);
+    fprintf(stderr, "[r440#%d] fd=%d pos=%#lx buf=%x want=%x\n", rn, (int)param_1, (unsigned long)_p, (unsigned)(uintptr_t)param_2, (unsigned)DAT_004b3e40); } }
   uint uVar1;
   int iVar2;
   int iVar3;
@@ -19253,9 +19265,9 @@ LAB_0042eac8:
   { const char *e = getenv("BBLIT_DEBUG");
     if (e) { long pos = lseek((int)DAT_004b3e44, 0, SEEK_CUR);
       unsigned char fb[4] = {0}; ssize_t nr = pread((int)DAT_004b3e44, fb, 4, pos);
-      fprintf(stderr, "[pread] fd=%d pos=%#lx want=%#x first=%02x%02x%02x%02x\n",
+      { static int pn = 0; if (e && pn++ < 12) fprintf(stderr, "[pread#%d] fd=%d pos=%#lx want=%#x first=%02x%02x%02x%02x\n", pn,
         (int)DAT_004b3e44, (unsigned long)pos, (unsigned)DAT_004b3e40,
-        nr>0?fb[0]:0, nr>1?fb[1]:0, nr>2?fb[2]:0, nr>3?fb[3]:0); } }
+        nr>0?fb[0]:0, nr>1?fb[1]:0, nr>2?fb[2]:0, nr>3?fb[3]:0); } } }
   FUN_0042e440((undefined4)DAT_004b3e44,(int)(uintptr_t)DAT_004b1cb8);
   iVar14 = 1;
   { unsigned char *q=(unsigned char *)pcVar20;
@@ -19271,6 +19283,9 @@ LAB_0042eac8:
     unsigned cnt = (unsigned)in1[1] * 0x10000u + (unsigned)in1[2] * 0x100u + (unsigned)in1[3];
     fprintf(stderr, "[try] cnt=%u in1=%p\n", cnt, (void*)in1);
     FUN_00430ff0(in1,(byte *)pcVar20);
+    /* LP64: COMMA takes [0x14] as the section-area root (pool base 24a0,
+     * pcVar20, +0x374).  It must be this section's output, not a guess. */
+    *(char **)(bze_state + 0x10 + 0x14) = (char *)pcVar20;
     { unsigned char *o=(unsigned char *)pcVar20;
       fprintf(stderr, "[dec-ok] out=%02x%02x%02x%02x %02x%02x%02x%02x\n",
         o[0],o[1],o[2],o[3],o[4],o[5],o[6],o[7]);
@@ -19392,6 +19407,10 @@ LAB_0042eac8:
         DAT_004b2240 = DAT_004b3164 + DAT_004b3774 * 0x14;
         DAT_004b3b70 = DAT_004b2240 + DAT_004b2244 * 0xb8;
         DAT_004b3a98 = DAT_004b3b70 + DAT_004b3644 * 0x58;
+        if (getenv("BBLIT_DEBUG")) { unsigned long _a = (unsigned long)(uintptr_t)DAT_004b3b70;
+          unsigned long _b = (unsigned long)(uintptr_t)DAT_004b3a98;
+          fprintf(stderr, "[comma] 3b70=%lx 3644=%#x 3a98=%lx expect=%lx\n",
+            _a, (unsigned)DAT_004b3644, _b, _a + (unsigned long)(unsigned)DAT_004b3644 * 0x58ul * 4ul); }
         DAT_004b374c = DAT_004b3a98 + DAT_004b2376 * 0xc;
         DAT_004b3a00 = DAT_004b374c + DAT_004b322c * 0x3c;
         *(char **)(puVar19 + 0x1c) = (char *)(DAT_004b3a00);
@@ -19803,7 +19822,16 @@ LAB_00430923:
                     *(uint *)(puVar19 + -4) = *(uint *)(puVar19 + 0x2c) & 0xffff;
                     *(undefined4 *)(puVar19 + -8) = 0x430158;
                     /* LP64: dropped arg, asm 0x430148-430153. */
+                    { int _n = (short)DAT_004b3644, _k; unsigned *_pp = (unsigned *)(uintptr_t)DAT_004b3b70;
+                      if (getenv("BBLIT_DEBUG")) { fprintf(stderr, "[800dump] want=%#x n=%d base=%p: ",
+                        (unsigned)(*(uint *)(puVar19 + 0x2c) & 0xffff), _n, (void*)DAT_004b3b70);
+                        for (_k = 0; _k < _n && _k < 8; _k++) fprintf(stderr, "[%d]+8=%#x f=%#x ", _k, _pp[_k*0x16+2], _pp[_k*0x16]);
+                        fprintf(stderr, "\n"); } }
                     iVar14 = FUN_00448800((int)(*(uint *)(puVar19 + 0x2c) & 0xffff));
+                    /* DIAG-ONLY: if the asset lookup misses, substitute entry 0
+                     * to test whether +8-stamping is the sole blocker. */
+                    if (iVar14 == 0 && getenv("BBLIT_FORCE800")) { iVar14 = (int)(uintptr_t)DAT_004b3b70;
+                      fprintf(stderr, "[force800] substituted entry0\n"); }
                     if (getenv("BBLIT_DEBUG")) { int _k; fprintf(stderr, "[0f] 800(%#x) -> %#x pool=%p n=%d e8=",
                       (unsigned)(*(uint *)(puVar19 + 0x2c) & 0xffff), (unsigned)iVar14, (void*)DAT_004b3b70, (int)DAT_004b3644);
                       for (_k = 0; _k < 4; _k++) fprintf(stderr, "%#x ", (unsigned)*(int *)((char *)(uintptr_t)DAT_004b3b70 + _k * 0x58 + 8));
@@ -19908,10 +19936,10 @@ LAB_00430923:
                       iVar14 = iVar14 + 1;
                     } while (iVar14 < 1);
                     *(ushort *)(iVar9 + 0x2a) = (ushort)(byte)puVar19[0x2c];
-                    /* LP64: fall-through shared exit adds 1 (asm 0x430726),
-                     * not 2.  The +2 skipped the terminator on section 0's
-                     * 1-byte tail (observed: walked into the next chunk). */
-                    pcVar21 = pcVar5 + 1;
+                    /* LP64: asm 0x42fe1c-42fe27 does inc esi past the 1 data
+                     * byte then jmp 0x430737 (next-tag, no advance).  From
+                     * the tag that is +2; pcVar5 is at the tag. */
+                    pcVar21 = pcVar5 + 2;
                     break;
                   case '\x16':
                   { static int ec8 = 0; if (getenv("BBLIT_DEBUG") && ec8++ < 1) fprintf(stderr, "[ec] %x\n", (unsigned)8); }
@@ -20313,11 +20341,11 @@ LAB_00430923:
                     *(undefined2 *)(iVar9 + 0x3c) = *(undefined2 *)(puVar19 + 0x2c);
                     *(undefined2 *)(iVar9 + 0x3e) = *(undefined2 *)(puVar19 + 0x2e);
 LAB_00430734:
-                    /* LP64: fall-through shared exit adds 4 (asm 0x430734),
-                     * not 5 (Ghidra-fused decompile).  The +5 skipped the '.'
-                     * terminator on section 0 (observed: entity-tag loop
-                     * walked into section garbage, hung in 0x0f with id 2). */
-                    pcVar21 = pcVar5 + 4;
+                    /* LP64: asm 0x430734 does esi+=4 with esi at DATA (the
+                     * dispatch already consumed the tag), i.e. tag+5.
+                     * pcVar5 is at the tag, so +5 (a +4 here desyncs by one:
+                     * observed entity-0x27 re-reading its last data byte). */
+                    pcVar21 = pcVar5 + 5;
                     break;
                   case 'A':
                   { static int ec27 = 0; if (getenv("BBLIT_DEBUG") && ec27++ < 1) fprintf(stderr, "[ec] %x\n", (unsigned)27); }
@@ -20377,7 +20405,8 @@ LAB_00430734:
               }
               *(int *)(puVar19 + -4) = iVar9;
               *(undefined4 *)(puVar19 + -8) = 0x430747;
-              ((long (*)())FUN_0042e600)();
+              /* LP64: dropped arg was (edi=entry), asm 0x430741 push edi. */
+              FUN_0042e600(iVar9);
               break;
             case '\t':
               { static int cc5 = 0; if (getenv("BBLIT_DEBUG") && cc5++ < 2) fprintf(stderr, "[case] %x\n", (unsigned)5); }
@@ -20679,6 +20708,7 @@ LAB_00430734:
               *(undefined4 *)(puVar19 + -0x10) = 0x42ee47;
               /* LP64: dropped args (pool,0x58,count*0x58); slot-derived. */
               iVar9 = (int)(uintptr_t)FUN_00448850((undefined4 *)(uintptr_t)DAT_004b3b70,0x58,(short)DAT_004b3644 * 0x58);
+              if (getenv("BBLIT_DEBUG")) fprintf(stderr, "[dqalloc] base=%p n=%#x -> %p\n", (void*)DAT_004b3b70, (unsigned)((short)DAT_004b3644 * 0x58), (void*)(uintptr_t)iVar9);
               if (iVar9 == 0) {
                 do {
                     /* WARNING: Do nothing block with infinite loop */
@@ -20796,6 +20826,9 @@ LAB_00430734:
                   pcVar5 = pcVar21 + 5;
                   *(uint *)(iVar9 + 0xc) = *(uint *)(puVar19 + 0x2e) & 0xffff;
                   *(undefined2 *)(iVar9 + 0x4e) = *(undefined2 *)(puVar19 + 0x2c);
+                  /* DIAG-ONLY: stamp +8 with the asset id to test whether the
+                   * missing id is the sole 800() blocker. */
+                  if (getenv("BBLIT_STAMP8")) *(undefined2 *)(iVar9 + 8) = *(undefined2 *)(puVar19 + 0x2e);
                   break;
                 case '(':
                   { unsigned char *pb = (unsigned char *)pcVar5; static int pn = 0;
@@ -20882,7 +20915,7 @@ LAB_0042f19b:
                    * (ecx=[esp+0x30] staged in -4 slot, edi=ebp+eax staged
                    * in -8 slot).  Zero-arg call read stack residue as both
                    * pointers (observed: fault at 0x42101000 in copy loop). */
-                  if (getenv("BBLIT_DEBUG")) fprintf(stderr, "[29] iVar9=%#x pcVar20=%p pcVar5=%p b=%02x%02x%02x%02x%02x%02x%02x%02x\n", (unsigned)iVar9, (void*)pcVar20, (void*)pcVar5, pcVar5[0]&255,pcVar5[1]&255,pcVar5[2]&255,pcVar5[3]&255,pcVar5[4]&255,pcVar5[5]&255,pcVar5[6]&255,pcVar5[7]&255);
+                  if (getenv("BBLIT_DEBUG")) fprintf(stderr, "[29] iVar9=%#x pcVar20=%p src=%p pcVar5=%p b=%02x%02x%02x%02x%02x%02x%02x%02x\n", (unsigned)iVar9, (void*)pcVar20, (void*)(pcVar20 + iVar9), (void*)pcVar5, pcVar5[0]&255,pcVar5[1]&255,pcVar5[2]&255,pcVar5[3]&255,pcVar5[4]&255,pcVar5[5]&255,pcVar5[6]&255,pcVar5[7]&255);
                   FUN_004229a0((undefined4 *)(uintptr_t)(pcVar20 + iVar9),(undefined4)(uintptr_t)DAT_004b3e40);
                   *(undefined1 **)(puVar19 + -4) = puVar19 + 0x24c;
                   *(char **)(puVar19 + -8) = pcVar20 + iVar9 + 4;
@@ -21159,7 +21192,11 @@ LAB_0042ed7d:
     if (getenv("BBLIT_DEBUG")) fprintf(stderr, "[scan] END-OF-SECTION /\n");
   }
   uVar15 = 0xffffffff;
-  pcVar20 = *(char **)((long)(uintptr_t)&PTR_s____BZE_TITLE_BZE_1_004ad380 + *(int *)(puVar19 + 0xc0));
+  /* LP64: the 0x4ad380 table holds (path-ptr,count) pairs at 4-byte
+   * stride; an 8-byte read merges count into the pointer (observed:
+   * 0x1004ac8e8 from count=1, fault scanning the path).  4-byte read;
+   * the +0xc0 offset is already byte arithmetic (asm 0x430aea). */
+  pcVar20 = (char *)(uintptr_t)*(unsigned *)((uintptr_t)&PTR_s____BZE_TITLE_BZE_1_004ad380 + *(int *)(puVar19 + 0xc0));
   do {
     pcVar5 = pcVar20;
     if (uVar15 == 0) break;
