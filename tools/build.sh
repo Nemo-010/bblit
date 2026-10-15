@@ -18,7 +18,7 @@ set -e
 cd "$(dirname "$0")/.."
 O=linux/build
 mkdir -p "$O"
-CFLAGS="-O1 -g -fno-strict-aliasing -w -Ilinux"
+CFLAGS="-O1 -g -fno-strict-aliasing -w -Ilinux -std=gnu17"
 gcc $CFLAGS -c linux/bblit_game.c        -o "$O/bblit_game.o"
 gcc $CFLAGS -c linux/data_syms.c         -o "$O/data_syms.o"
 gcc $CFLAGS -c linux/port_main.c         -o "$O/port_main.o"

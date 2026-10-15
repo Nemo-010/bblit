@@ -221,7 +221,7 @@ HWND GetForegroundWindow(void) { return 0; }
 HWND SetFocus(HWND h) { (void)h; return h; }
 HWND FindWindowA(LPCSTR cls, LPCSTR title) { (void)cls; (void)title; return 0; }
 int MessageBoxA(HWND h, LPCSTR text, LPCSTR cap, UINT type)
-{ (void)h; (void)type; fprintf(stderr, "%s: %s\n", cap ? cap : "", text ? text : ""); return 1; }
+{ (void)h; (void)type; fprintf(stderr, "%s: %s\n", cap ? cap : "", text ? text : ""); return 2; }  /* IDCANCEL: retry dialogs can never be answered Retry headless, so report Cancel so callers exit instead of spinning */
 void PostQuitMessage(int code) { exit(code); }
 BOOL PeekMessageA(LPMSG msg, HWND h, UINT lo, UINT hi, UINT remove)
 { (void)msg; (void)h; (void)lo; (void)hi; (void)remove; return 0; }  /* STUB-DIVERGENCE */

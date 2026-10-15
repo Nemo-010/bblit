@@ -412,7 +412,7 @@ uint FUN_00451600(uint param_1,int *param_2);
 void FUN_00451810(uint param_1,uint param_2,uint param_3,code *param_4);
 void FUN_004519c0(uint param_1,uint param_2,int param_3,code *param_4);
 void FUN_00451a20(undefined1 *param_1,undefined1 *param_2,int param_3);
-undefined4 FUN_00451a50(undefined4 param_1);
+undefined4 FUN_00451a50(const char *fmt, ...);
 undefined4 * FUN_00451a90(undefined4 *param_1,undefined4 *param_2,uint param_3);
 undefined4 FUN_00451e00(int param_1,undefined4 param_2,int param_3);
 void FUN_00451e40(uint param_1,char *param_2,uint param_3,int param_4);

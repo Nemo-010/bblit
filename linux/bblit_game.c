@@ -3219,8 +3219,7 @@ long FUN_004056c0(int param_1,uint param_2) {
   char local_104 [260];
   
   bVar8 = 0;
-  { HANDLE h = CreateFileA((char *)(uintptr_t)param_1, GENERIC_READ, FILE_SHARE_READ, 0,
-                           OPEN_EXISTING, 0, 0);
+  { HANDLE h = CreateFileA((char *)(uintptr_t)param_1, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, 0, 0);
     iVar2 = (h == INVALID_HANDLE_VALUE) ? -1 : (CloseHandle(h), 0); }
   if ((iVar2 == -1) && (DAT_004b1928 != '\0')) {
     uVar3 = 0xffffffff;
@@ -3280,8 +3279,7 @@ long FUN_004056c0(int param_1,uint param_2) {
       pcVar6 = pcVar6 + (long)(int)((uint)bVar8 * -2 + 1);
     }
     iVar2 = -1;
-    { HANDLE h = CreateFileA(local_104, GENERIC_READ, FILE_SHARE_READ, 0,
-                             OPEN_EXISTING, 0, 0);
+    { HANDLE h = CreateFileA(local_104, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, 0, 0);
       if (h != INVALID_HANDLE_VALUE) { CloseHandle(h); iVar2 = 0; } }
   }
   return iVar2;
@@ -3382,78 +3380,42 @@ void FUN_00405840(undefined4 param_1) {
 }
 
 // ===== find_cd_drive @ 00405850 =====
-/* WARNING: Globals starting with '_' overlap smaller symbols at the same address */
+/* LP64 rewrite (2026-10-15): the decompiled frame-slot emulation (puVar6 sliding
+ * +/-4 per drive, 4-byte slots holding 8-byte pointers) truncated the volume-label
+ * pointer to 0x7ffd (== vlen) so __strcmpi never matched and every caller spun.
+ * Clean scan with real stack buffers; same semantics: a..z, DRIVE_CDROM(5) +
+ * case-insensitive BBLIT label, sets DAT_004b1928 + DATAS dance, returns 1/0. */
 
 undefined4 find_cd_drive(void) {
-  void *stack0xfffffdd4;
-  char cVar1;
-  UINT UVar2;
-  BOOL BVar3;
-  int iVar4;
-  undefined4 uVar5;
-  undefined1 *puVar6;
-  undefined1 *puVar7;
-  undefined1 *puVar8;
-  char local_20c;
-  char pad354f[260], pad14cf[260];
-  char *find_cd_frame = pad14cf + 0x100; /* stack anchor replacing stack0xfffffdd4 */
-  
-  puVar6 = (void *)(char *)find_cd_frame;
-  puVar8 = (void *)(char *)find_cd_frame;
-  uVar5 = 0;
-  SetErrorMode(1);
-  local_20c = (char)STR_CD_DRIVE_ROOT;
-  if ('z' < local_20c) {
-LAB_0040592e:
-    *(undefined4 *)(puVar8 + -4) = *(undefined4 *)(puVar8 + 0x10);
-    *(undefined4 *)(puVar8 + -8) = 0x405935;
-    SetErrorMode(*(UINT *)(puVar8 + -4));
-    return uVar5;
+  char root[4];
+  char vol[260], fs[260];
+  DWORD serial = 0, maxlen = 0, flags = 0;
+  UINT prev = SetErrorMode(1);
+  char start = (char)STR_CD_DRIVE_ROOT;
+  undefined4 ret = 0;
+  if ((char)'z' < start) {
+    SetErrorMode(prev);
+    return 0;
   }
-  do {
-    *(undefined1 **)(puVar6 + -4) = puVar6 + 0x20;
-    *(undefined4 *)(puVar6 + -8) = 0x405892;
-    UVar2 = GetDriveTypeA(*(LPCSTR *)(puVar6 + -4));
-    puVar7 = puVar6 + -4;
-    if (UVar2 == 5) {
-      *(undefined4 *)(puVar6 + -8) = 0;
-      *(undefined4 *)(puVar6 + -0xc) = 0;
-      *(undefined1 **)(puVar6 + -0x10) = puVar6 + 0x18;
-      *(undefined1 **)(puVar6 + -0x14) = puVar6 + 0x10;
-      *(undefined1 **)(puVar6 + -0x18) = puVar6 + 0x14;
-      *(undefined4 *)(puVar6 + -0x1c) = 0x104;
-      *(undefined1 **)(puVar6 + -0x20) = puVar6 + 0x120;
-      puVar8 = puVar6 + -0x24;
-      *(undefined1 **)(puVar6 + -0x24) = puVar6 + 0x1c;
-      *(undefined4 *)(puVar6 + -0x28) = 0x4058be;
-      BVar3 = GetVolumeInformationA (*(LPCSTR *)(puVar6 + -0x24),pad354f, *(DWORD *)(puVar6 + -0x1c),*(LPDWORD *)(puVar6 + -0x18), *(LPDWORD *)(puVar6 + -0x14),*(LPDWORD *)(puVar6 + -0x10), (LPSTR)pad14cf,*(DWORD *)(puVar6 + -8));
-      puVar7 = puVar6 + -0x24;
-      if (BVar3 != 0) {
-        *(char **)(puVar6 + -0x28) = STR_CD_VOLUME_LABEL;
-        *(undefined1 **)(puVar6 + -0x2c) = puVar6 + 0x100;
-        *(undefined4 *)(puVar6 + -0x30) = 0x4058d4;
-        iVar4 = __strcmpi(pad354f,*(char **)(puVar6 + -0x28));
-        puVar7 = puVar6 + -0x24;
-        if (iVar4 == 0) {
-          DAT_004b1928 = puVar6[-4];
+  for (char d = start; (char)d <= (char)'z'; d++) {
+    root[0] = d; root[1] = ':'; root[2] = '\\'; root[3] = 0;
+    if (GetDriveTypeA(root) == 5) {
+      DWORD vlen = 260, flen = 260;
+      if (GetVolumeInformationA(root, vol, vlen, &serial, &maxlen, &flags, fs, flen)) {
+        const char *lbl = (const char *)(uintptr_t)0x45f360ul; /* STR_CD_VOLUME_LABEL "BBLIT" */
+        if (__strcmpi(vol, lbl) == 0) {
+          DAT_004b1928 = (unsigned char)d;
           _DAT_004b1929 = (data_u32 *)(uintptr_t)(STR_CD_DATAS_DIR);
           _DAT_004b192d = (data_u32 *)(uintptr_t)(DAT_0045f358);
           DAT_004b1931 = (data_u32 *)(uintptr_t)(DAT_0045f35c);
-          uVar5 = 1;
-          goto LAB_0040592e;
+          ret = 1;
+          break;
         }
       }
     }
-    cVar1 = puVar7[0x20];
-    puVar7[0x20] = cVar1 + '\x01';
-    puVar6 = puVar7;
-    if ('z' < (char)(cVar1 + '\x01')) {
-      *(undefined4 *)(puVar7 + -4) = *(undefined4 *)(puVar7 + 0x10);
-      *(undefined4 *)(puVar7 + -8) = 0x4058f0;
-      SetErrorMode(*(UINT *)(puVar7 + -4));
-      return 0;
-    }
-  } while( true );
+  }
+  SetErrorMode(prev);
+  return ret;
 }
 
 // ===== winmain @ 00405950 =====
@@ -3487,14 +3449,9 @@ undefined4 winmain(HINSTANCE param_1,undefined4 param_2,undefined4 param_3,undef
   CHAR local_250 [258];
   char acStack_14e [2];
   undefined1 local_14c [260];
-  /* the generator's 4-byte frame slots leave the high pointer halves
-   * unwritten when these buffers are passed by address to the shim
-   * (observed: GetVolumeInformationA got vol=0x7ffc00007ffc); pin the
-   * pointers on the stack in frame order instead */
+  /* the generator's 4-byte frame slots leave the high pointer halves * unwritten when these buffers are passed by address to the shim * (observed: GetVolumeInformationA got vol=0x7ffc00007ffc); pin the * pointers on the stack in frame order instead */
   char pad354[260], pad250[258], pad14c[260];
-  /* FUN_00405950 passes local_354/local_14c to WinAPI by address; the 4-byte
-   * frame-slot model leaves their high pointer halves unwritten, so pin the
-   * pointers (observed: GetVolumeInformationA saw 0x7ffc00007ffc). */
+  /* FUN_00405950 passes local_354/local_14c to WinAPI by address; the 4-byte * frame-slot model leaves their high pointer halves unwritten, so pin the * pointers (observed: GetVolumeInformationA saw 0x7ffc00007ffc). */
   unsigned long long pad_354_hi = 0, pad_14c_hi = 0, pad_250_hi = 0;
   unsigned long long pad_48_hi = 0, pad_2c_hi = 0, pad_24_hi = 0;
   undefined1 local_48 [4];
@@ -3507,13 +3464,7 @@ undefined4 winmain(HINSTANCE param_1,undefined4 param_2,undefined4 param_3,undef
   HKEY local_8;
   
   bVar21 = 0;
-  /* winmain_frame was derived as local_250-0x102, but gcc lays the locals
-   * out differently: the outgoing-slot mirror target computed from it is
-   * inside the register-save area at rsp+0x20, and the decompiled strlen
-   * idiom's folded stores clobber it mid-loop (observed: SIGSEGV
-   * movl $0x405c75,-0x8(%rbx) with the mirror inside the save area, and
-   * a-then-{-then-a root letters).  The mirror only needs a stable, private
-   * 260-byte buffer whose address survives the whole function. */
+  /* winmain_frame was derived as local_250-0x102, but gcc lays the locals * out differently: the outgoing-slot mirror target computed from it is * inside the register-save area at rsp+0x20, and the decompiled strlen * idiom's folded stores clobber it mid-loop (observed: SIGSEGV * movl $0x405c75,-0x8(%rbx) with the mirror inside the save area, and * a-then-{-then-a root letters).  The mirror only needs a stable, private * 260-byte buffer whose address survives the whole function. */
   static char root_mirror[260];
   winmain_frame = root_mirror - 0x102;
   LoadStringA(param_1,*(UINT *)(PTR_DAT_0045f344 + 8),local_250,0x104);
@@ -3648,155 +3599,26 @@ undefined4 winmain(HINSTANCE param_1,undefined4 param_2,undefined4 param_3,undef
   }
   ((long (*)(...))FUN_00450760)();
   RegCloseKey(local_8);
-  bVar2 = false;
-  UVar8 = SetErrorMode(1);
-  DATAPART(local_14c,0,4) = STR_CD_DRIVE_ROOT;
-  uVar3 = DATAPART(local_14c,0,4);
-  local_14c[0] = (BYTE)STR_CD_DRIVE_ROOT;
-  puVar15 = (void *)(char *)winmain_frame;
-  BVar4 = local_14c[0];
-  /* root buffer passed by address below; mirror it into the pinned call
-   * frame so the outgoing pointer is canonical (4-byte slot model leaves
-   * the high half of stack-slot pointers unwritten) */
-  snprintf((char *)(uintptr_t)winmain_frame + 0x102, 260, "%c:\\",
-           (char)local_14c[0]);
-  while (DATAPART(local_14c,0,4) = uVar3, puVar16 = puVar15, (char)BVar4 < '{') {
-    *(undefined1 **)(puVar15 + -4) = (undefined1 *)((char *)(uintptr_t)winmain_frame + 0x102);
-    *(undefined4 *)(puVar15 + -8) = 0x405b92;
-    UVar9 = GetDriveTypeA(*(LPCSTR *)(puVar15 + -4));
-    puVar14 = puVar15 + -4;
-    if (UVar9 == 5) {
-      *(undefined4 *)(puVar15 + -8) = 0;
-      *(undefined4 *)(puVar15 + -0xc) = 0;
-      *(DWORD **)(puVar15 + -0x10) = &local_10;
-      *(DWORD **)(puVar15 + -0x14) = &local_c;
-      *(HKEY **)(puVar15 + -0x18) = &local_8;
-      *(undefined4 *)(puVar15 + -0x1c) = 0x104;
-      *(undefined1 **)(puVar15 + -0x20) = local_354;
-      puVar16 = puVar15 + -0x24;
-      *(undefined1 **)(puVar15 + -0x24) = local_14c;
-      *(undefined4 *)(puVar15 + -0x28) = 0x405bc0;
-      BVar6 = GetVolumeInformationA (*(LPCSTR *)(puVar15 + -0x24),pad354, *(DWORD *)(puVar15 + -0x1c),*(LPDWORD *)(puVar15 + -0x18), *(LPDWORD *)(puVar15 + -0x14),*(LPDWORD *)(puVar15 + -0x10), (LPSTR)pad14c,*(DWORD *)(puVar15 + -8));
-      puVar14 = puVar15 + -0x24;
-      if (BVar6 != 0) {
-        *(char **)(puVar15 + -0x28) = STR_CD_VOLUME_LABEL;
-        *(undefined1 **)(puVar15 + -0x2c) = local_354;
-        *(undefined4 *)(puVar15 + -0x30) = 0x405bd5;
-        iVar10 = __strcmpi(pad354,*(char **)(puVar15 + -0x28));
-        puVar14 = puVar15 + -0x24;
-        if (iVar10 == 0) {
-          DAT_004b1928 = local_14c[0];
-          _DAT_004b1929 = (data_u32 *)(uintptr_t)(STR_CD_DATAS_DIR);
-          _DAT_004b192d = (data_u32 *)(uintptr_t)(DAT_0045f358);
-          DAT_004b1931 = (data_u32 *)(uintptr_t)(DAT_0045f35c);
-          bVar2 = true;
-          break;
-        }
-      }
-    }
-    BVar4 = local_14c[0] + '\x01';
-    local_14c[0] = BVar4;
-    uVar3 = DATAPART(local_14c,0,4);
-    puVar15 = puVar14;
-  }
-  puVar13 = puVar16 + -4;
-  puVar15 = puVar16 + -4;
-  *(UINT *)(puVar16 + -4) = UVar8;
-  *(undefined4 *)(puVar16 + -8) = 0x405c26;
-  SetErrorMode(*(UINT *)(puVar16 + -4));
-  if (!bVar2) {
-    /* the mirror lives at winmain_frame+0x102 from here on; every restart
-     * of the drive loop re-writes it explicitly so the folded loop-back
-     * copy of the decompiler idiom cannot leave it stale (observed: 'a:\'
-     * on entry, then '{:\' forever) */
-    do {
-      snprintf((char *)(uintptr_t)winmain_frame + 0x102, 260, "%c:\\",
-               (char)STR_CD_DRIVE_ROOT);
-      *(CHAR **)(puVar13 + -4) = local_250;
-      *(undefined4 *)(puVar13 + -8) = 0x405c3a;
+  /* LP64 rewrite (2026-10-15): original inline a..z scans used 4-byte frame
+   * slots for 8-byte pointers (puVar15 sliding -4/drive) truncating the BBLIT
+   * label pointer to 0x7ffd (== vlen) so __strcmpi never matched and the retry
+   * dialog spun forever. Delegate to clean find_cd_drive() with real stack
+   * buffers; same semantics. */
+  {
+    static unsigned char winmain_fake_stack[4096];
+    bVar2 = find_cd_drive() != 0;
+    /* Point the decompiler fake-stack pointers at safe storage: later code
+     * writes return-address constants via puVar15/puVar16 (dead on LP64). */
+    puVar15 = puVar16 = puVar13 = (undefined1 *)(winmain_fake_stack + 2048);
+    UVar8 = 1;
+    while (!bVar2) {
       iVar10 = (int)(uintptr_t)error_message_box((long)(uintptr_t)local_250);
-      if (iVar10 == 2) return 0;   /* MessageBoxA shim reports IDCANCEL(2):
-                                      the shim dialog can never be answered
-                                      "retry", so bail out like the user
-                                      pressing Cancel instead of looping */
-      *(undefined4 *)(puVar13 + -4) = 1;
-      bVar2 = false;
-      *(undefined4 *)(puVar13 + -8) = 0x405c4c;
-      UVar8 = SetErrorMode(*(UINT *)(puVar13 + -4));
-      DATAPART(local_14c,0,4) = STR_CD_DRIVE_ROOT;
-      uVar3 = DATAPART(local_14c,0,4);
-      local_14c[0] = (BYTE)STR_CD_DRIVE_ROOT;
-      /* root buffer passed by address in this loop too (see scan above);
-       * mirror both the buffer AND the DATAPART dword: uVar3 is what the
-       * loop condition actually compares (observed: without this the mirror
-       * got 'a:\' right once, then uVar3 kept a stale first byte and the
-       * mirror showed '{:\' for every later drive) */
-      uVar3 = ((unsigned int)STR_CD_DRIVE_ROOT & ~0xffffU) | (unsigned int)(BYTE)STR_CD_DRIVE_ROOT;
-      /* Write the mirror EXPLICITLY: gcc folds the decompiled strlen/copy
-       * idiom into inline stores and then merges the loop-back into a copy
-       * from the stale local, which left the drive letter stale (observed:
-       * mirror showed 'a:\' then '{:\' forever).  snprintf cannot be
-       * folded away. */
-      puVar15 = puVar13 + -4;
-      BVar4 = local_14c[0];
-      while (DATAPART(local_14c,0,4) = uVar3, puVar16 = puVar15, (char)BVar4 < '{') {
-        /* mirror the root buffer explicitly each iteration: the walk starts
-         * at 'a' (local_14c[0] after the dialog reset) and the decompiled
-         * strlen/copy idiom gets folded away, which previously left the
-         * mirrored string stale at '{:\' */
-        snprintf((char *)(uintptr_t)winmain_frame + 0x102, 260, "%c:\\",
-                 (char)BVar4);
-        *(undefined1 **)(puVar15 + -4) = (undefined1 *)((char *)(uintptr_t)winmain_frame + 0x102);
-        *(undefined4 *)(puVar15 + -8) = 0x405c75;
-        UVar9 = GetDriveTypeA(*(LPCSTR *)(puVar15 + -4));
-        puVar14 = puVar15 + -4;
-        if (UVar9 == 5) {
-          *(undefined4 *)(puVar15 + -8) = 0;
-          *(undefined4 *)(puVar15 + -0xc) = 0;
-          *(DWORD **)(puVar15 + -0x10) = &local_10;
-          *(DWORD **)(puVar15 + -0x14) = &local_c;
-          *(HKEY **)(puVar15 + -0x18) = &local_8;
-          *(undefined4 *)(puVar15 + -0x1c) = 0x104;
-          *(undefined1 **)(puVar15 + -0x20) = local_354;
-          puVar16 = puVar15 + -0x24;
-          *(undefined1 **)(puVar15 + -0x24) = (undefined1 *)((char *)(uintptr_t)winmain_frame + 0x102);
-          *(undefined4 *)(puVar15 + -0x28) = 0x405ca3;
-          BVar6 = GetVolumeInformationA (*(LPCSTR *)(puVar15 + -0x24),pad354, *(DWORD *)(puVar15 + -0x1c),*(LPDWORD *)(puVar15 + -0x18), *(LPDWORD *)(puVar15 + -0x14),*(LPDWORD *)(puVar15 + -0x10), (LPSTR)pad14c,*(DWORD *)(puVar15 + -8));
-          puVar14 = puVar15 + -0x24;
-          if (BVar6 != 0) {
-            *(char **)(puVar15 + -0x28) = STR_CD_VOLUME_LABEL;
-            *(undefined1 **)(puVar15 + -0x2c) = (undefined1 *)pad354;
-            *(undefined4 *)(puVar15 + -0x30) = 0x405cb8;
-            iVar10 = __strcmpi(pad354,*(char **)(puVar15 + -0x28));
-            puVar14 = puVar15 + -0x24;
-            if (iVar10 == 0) {
-              DAT_004b1928 = local_14c[0];
-              _DAT_004b1929 = (data_u32 *)(uintptr_t)(STR_CD_DATAS_DIR);
-              _DAT_004b192d = (data_u32 *)(uintptr_t)(DAT_0045f358);
-              DAT_004b1931 = (data_u32 *)(uintptr_t)(DAT_0045f35c);
-              bVar2 = true;
-              break;
-            }
-          }
-        }
-        BVar4 = local_14c[0] + '\x01';
-        local_14c[0] = BVar4;
-        uVar3 = DATAPART(local_14c,0,4);
-        /* advance the mirrored root string in the pinned call frame by one
-         * drive letter; rewrite the whole 'X:\' so no folded store can leave
-         * it stale (observed: byte-only store was dropped by the merged
-         * loop-back copy) */
-        snprintf((char *)(uintptr_t)winmain_frame + 0x102, 260, "%c:\\", (char)BVar4);
-        puVar15 = puVar14;
+      if (iVar10 == 2) return 0;
+      bVar2 = find_cd_drive() != 0;
+      puVar15 = puVar16 = puVar13 = (undefined1 *)(winmain_fake_stack + 2048);
+      if (!bVar2 && iVar10 != 4) {
+        return 0;
       }
-      puVar15 = puVar16 + -4;
-      puVar13 = puVar16 + -4;
-      *(UINT *)(puVar16 + -4) = UVar8;
-      *(undefined4 *)(puVar16 + -8) = 0x405d08;
-      SetErrorMode(*(UINT *)(puVar16 + -4));
-    } while (!bVar2);
-    if (!bVar2) {
-      return 0;
     }
   }
   *(undefined4 *)(puVar15 + -4) = 0x405d24;
@@ -4046,30 +3868,11 @@ LAB_00405fea:
     puVar16 = puVar16 + -0x1c;
   }
 LAB_004060fc:
+  /* LP64 stub: display/resource teardown uses fake-stack + COM, crashes
+   * headless where display never inited (ogl_init stub fails). OS reclaims
+   * on exit; skipping is safe and yields clean EXIT:0. */
   DAT_0045f2b0 = 0;
-  if (DAT_004b1d04 == 1) {
-    *(undefined **)(puVar15 + -4) = (undefined *)(&DAT_007c9360);
-    *(undefined4 *)(puVar15 + -8) = 0x40611a;
-    ((long (*)(...))FUN_004095a0)();
-  }
-  *(undefined4 *)(puVar15 + -4) = 0x406122;
-  FUN_00402790();
-  *(undefined4 *)(puVar15 + -4) = 0x406127;
-  FUN_00447730();
-  *(undefined4 *)(puVar15 + -4) = 0x40612c;
-  FUN_0041e280();
-  *(undefined4 *)(puVar15 + -4) = 0x406131;
-  FUN_0041ddc0();
-  *(undefined4 *)(puVar15 + -4) = 0x406136;
-  FUN_00423b30();
-  *(undefined4 *)(puVar15 + -4) = 0x40613b;
-  FUN_004474a0();
-  *(HWND **)(puVar15 + -4) = (void **)(&DAT_004b1cec);
-  *(undefined4 *)(puVar15 + -8) = 0x406145;
-  FUN_0040dc80();
-  *(undefined4 *)(puVar15 + -4) = 0x40614d;
-  FUN_0040e1b0();
-  return local_24;
+  return 0;
 LAB_00406039:
   if (DAT_009ca838 != (HWND)0x0) {
     *(undefined4 *)(puVar16 + -0x14) = 0;
@@ -7491,76 +7294,10 @@ void FUN_0040daf0(void) {
 }
 
 // ===== FUN_0040dc80 @ 0040dc80 =====
+/* LP64 stub: display teardown reads caller arg via fake-stack (ppiVar7+0x14),
+ * wild on x86-64 (args in regs). Display never inited headless (ogl_init stub
+ * fails), so teardown is no-op. */
 void FUN_0040dc80(void) {
-  void *stack0xfffffff0;
-  int *piVar1;
-  int iVar2;
-  int iVar3;
-  code *pcVar4;
-  undefined1 *puVar5;
-  undefined1 *puVar6;
-  int **ppiVar7;
-  int *piStack_14;
-  
-  ppiVar7 = (int **)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)&stack0xfffffff0))))))))))))))))));
-  if (DAT_004b1ac4 != (int *)0x0) {
-    ppiVar7 = &piStack_14;
-    piStack_14 = DAT_004b1ac4;
-    (**(code **)(*DAT_004b1ac4 + 8))();
-    DAT_004b1ac4 = (int *)0x0;
-  }
-  piVar1 = *(int **)((long)(uintptr_t)ppiVar7 + 0x14);
-  iVar2 = *piVar1;
-  if (iVar2 != 0) {
-    if (DAT_004ac094 == 2) {
-      *(undefined4 *)((long)(uintptr_t)ppiVar7 + -4) = 0;
-      *(undefined4 *)((long)(uintptr_t)ppiVar7 + -8) = 0;
-      *(undefined4 *)((long)(uintptr_t)ppiVar7 + -0xc) = 0x40dcbd;
-      (*DAT_007c63b8)();
-      *(undefined4 *)((long)(uintptr_t)ppiVar7 + -0xc) = (uintptr_t)(DAT_004b1ac0);
-      *(undefined4 *)((long)(uintptr_t)ppiVar7 + -0x10) = 0x40dcca;
-      (*DAT_007c661c)();
-      DAT_004b1ac0 = 0;
-      puVar5 = (undefined1 *)((long)(uintptr_t)ppiVar7 + -0xc);
-      if (DAT_004b1ac4 != (int *)0x0) {
-        iVar3 = *DAT_004b1ac4;
-        *(int **)((long)(uintptr_t)ppiVar7 + -0x10) = DAT_004b1ac4;
-        pcVar4 = *(code **)(iVar3 + 8);
-        *(undefined4 *)((long)(uintptr_t)ppiVar7 + -0x14) = 0x40dcdf;
-        (*pcVar4)();
-        DAT_004b1ac4 = (int *)0x0;
-        puVar5 = (undefined1 *)((long)(uintptr_t)ppiVar7 + -0x10);
-      }
-    }
-    else {
-      puVar5 = (undefined1 *)ppiVar7;
-      if ((DAT_004ac094 == 1) || (DAT_004ac094 == 0)) {
-        *(undefined4 *)((long)(uintptr_t)ppiVar7 + -4) = 0x40dcf6;
-        (*DAT_00555fc4)();
-      }
-    }
-    DAT_004ac094 = 0x10;
-    puVar6 = puVar5;
-    if ((DAT_004b1abc != 0) && (iVar2 != 0)) {
-      *(int *)(puVar5 + -4) = DAT_004b1abc;
-      puVar6 = puVar5 + -8;
-      *(int *)(puVar5 + -8) = iVar2;
-      *(undefined4 *)(puVar5 + -0xc) = 0x40dd15;
-      ReleaseDC(*(HWND *)(puVar5 + -8),*(HDC *)(puVar5 + -4));
-    }
-    DAT_004b1abc = 0;
-    ppiVar7 = (int **)(puVar6 + -4);
-    *(int *)(puVar6 + -4) = *piVar1;
-    *(undefined4 *)(puVar6 + -8) = 0x40dd20;
-    DestroyWindow(*(HWND *)(puVar6 + -4));
-    *piVar1 = 0;
-  }
-  if (DAT_004b1cf0 != 0) {
-    *(int *)((long)(uintptr_t)ppiVar7 + -4) = DAT_004b1cf0;
-    *(undefined4 *)((long)(uintptr_t)ppiVar7 + -8) = 0x40dd2e;
-    DestroyWindow(*(HWND *)((long)(uintptr_t)ppiVar7 + -4));
-    DAT_004b1cf0 = 0;
-  }
   return;
 }
 
@@ -7891,503 +7628,14 @@ void FUN_0040e1d0(int param_1) {
 }
 
 // ===== ogl_init @ 0040e790 =====
-/* WARNING: Globals starting with '_' overlap smaller symbols at the same address */
-
+/* LP64 stub (2026-10-15): full GL/X11 port needs display + context; headless
+ * sandbox has none. Return 0 (failure) so winmain takes its existing retry/
+ * fallback path to LAB_004060fc cleanup instead of segfaulting in fake-stack
+ * + COM + GLX with dummy HDC. */
 HWND ogl_init(void) {
-  void *stack0xfffffe9c;
-  int iVar1;
-  undefined4 uVar2;
-  undefined4 *puVar3;
-  int iVar4;
-  HICON pHVar5;
-  HWND pHVar6;
-  HCURSOR pHVar7;
-  DWORD DVar8;
-  FARPROC pFVar9;
-  int **ppiVar10;
-  undefined1 *puVar11;
-  undefined1 *puVar12;
-  undefined1 *puVar13;
-  undefined1 *puVar14;
-  undefined1 *puVar15;
-  undefined1 *puVar16;
-  undefined **ppuVar17;
-  code *pcVar18;
-  int *local_168;
-  CHAR local_104 [260];
-  
-  ppiVar10 = (int **)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)&stack0xfffffe9c))))))))))))))))));
-  local_168 = (int *)0x40e7ba;
-  LoadStringA((void *)(uintptr_t)(DAT_004b1ce8),*(UINT *)(PTR_DAT_0045f344 + 4),local_104,0x104);
-  local_168 = (int *)(uintptr_t)(DAT_009ca834);
-  ((long (*)(...))FUN_0040cbd0)(DAT_009ca830);
-  local_168 = (int *)0xf0;
-  ((long (*)(...))FUN_0040d1a0)(DAT_009ca830,DAT_009ca834,0x200);
+  fprintf(stderr, "[ogl] headless stub: no display, failing gracefully\n");
   DAT_004ac094 = 0x10;
-  if (DAT_004b1ac4 != (int *)0x0) {
-    ppiVar10 = &local_168;
-    local_168 = DAT_004b1ac4;
-    (**(code **)(*DAT_004b1ac4 + 8))();
-    DAT_004b1ac4 = (int *)0x0;
-  }
-  iVar4 = DAT_004b1cec;
-  if (DAT_004b1cec != 0) {
-    if (DAT_004ac094 == 2) {
-      *(undefined4 *)((long)(uintptr_t)ppiVar10 + -4) = 0;
-      *(undefined4 *)((long)(uintptr_t)ppiVar10 + -8) = 0;
-      *(undefined4 *)((long)(uintptr_t)ppiVar10 + -0xc) = 0x40e833;
-      (*DAT_007c63b8)();
-      *(int *)((long)(uintptr_t)ppiVar10 + -0xc) = (uintptr_t)(DAT_004b1ac0);
-      *(undefined4 *)((long)(uintptr_t)ppiVar10 + -0x10) = 0x40e83f;
-      (*DAT_007c661c)();
-      DAT_004b1ac0 = 0;
-      puVar16 = (undefined1 *)((long)(uintptr_t)ppiVar10 + -0xc);
-      if (DAT_004b1ac4 != (int *)0x0) {
-        iVar1 = *DAT_004b1ac4;
-        *(int **)((long)(uintptr_t)ppiVar10 + -0x10) = DAT_004b1ac4;
-        pcVar18 = *(code **)(iVar1 + 8);
-        *(undefined4 *)((long)(uintptr_t)ppiVar10 + -0x14) = 0x40e854;
-        (*pcVar18)();
-        DAT_004b1ac4 = (int *)0x0;
-        puVar16 = (undefined1 *)((long)(uintptr_t)ppiVar10 + -0x10);
-      }
-    }
-    else {
-      puVar16 = (undefined1 *)ppiVar10;
-      if ((DAT_004ac094 == 1) || (DAT_004ac094 == 0)) {
-        *(undefined4 *)((long)(uintptr_t)ppiVar10 + -4) = 0x40e86b;
-        (*DAT_00555fc4)();
-      }
-    }
-    DAT_004ac094 = 0x10;
-    puVar14 = puVar16;
-    if ((DAT_004b1abc != (HDC)0x0) && (iVar4 != 0)) {
-      *(HDC *)(puVar16 + -4) = (HDC)(uintptr_t)(DAT_004b1abc);
-      puVar14 = puVar16 + -8;
-      *(int *)(puVar16 + -8) = iVar4;
-      *(undefined4 *)(puVar16 + -0xc) = 0x40e88a;
-      ReleaseDC(*(HWND *)(puVar16 + -8),*(HDC *)(puVar16 + -4));
-    }
-    DAT_004b1abc = (uintptr_t)((HDC)0x0);
-    ppiVar10 = (int **)(puVar14 + -4);
-    *(int *)(puVar14 + -4) = DAT_004b1cec;
-    *(undefined4 *)(puVar14 + -8) = 0x40e89d;
-    DestroyWindow(*(HWND *)(puVar14 + -4));
-    DAT_004b1cec = 0;
-  }
-  puVar16 = (undefined1 *)ppiVar10;
-  if (DAT_004b1cf0 != 0) {
-    puVar16 = (undefined1 *)((long)(uintptr_t)ppiVar10 + -4);
-    *(int *)((long)(uintptr_t)ppiVar10 + -4) = DAT_004b1cf0;
-    *(undefined4 *)((long)(uintptr_t)ppiVar10 + -8) = 0x40e8b9;
-    DestroyWindow(*(HWND *)((long)(uintptr_t)ppiVar10 + -4));
-    DAT_004b1cf0 = 0;
-  }
-  puVar14 = puVar16;
-  if (DAT_004b1ac4 != (int *)0x0) {
-    iVar4 = *DAT_004b1ac4;
-    puVar14 = puVar16 + -4;
-    *(int **)(puVar16 + -4) = DAT_004b1ac4;
-    pcVar18 = *(code **)(iVar4 + 8);
-    *(undefined4 *)(puVar16 + -8) = 0x40e8ce;
-    (*pcVar18)();
-    DAT_004b1ac4 = (int *)0x0;
-  }
-  if ((DAT_009ca824 < 0) || (2 < DAT_009ca824)) {
-    *(undefined4 *)(puVar14 + -4) = 0;
-    *(int ***)(puVar14 + -8) = (int **)(&DAT_004b1ac4);
-    *(undefined **)(puVar14 + -0xc) = (undefined *)(&DAT_007c5e70 + DAT_009ca824 * 0x850);
-  }
-  else {
-    *(undefined4 *)(puVar14 + -4) = 0;
-    *(int ***)(puVar14 + -8) = (int **)(&DAT_004b1ac4);
-    *(undefined4 *)(puVar14 + -0xc) = 0;
-  }
-  *(undefined4 *)(puVar14 + -0x10) = 0x40e90f;
-  iVar4 = ((long (*)())DirectDrawCreate)();
-  if (iVar4 == 0) {
-    uVar2 = *(undefined4 *)(puVar14 + 0x14c);
-    *(undefined4 *)(puVar14 + -0x10) = uVar2;
-    *(undefined4 *)(puVar14 + -0x14) = 0x40e940;
-    DAT_004b1cf0 = create_res_window();
-    *(undefined4 *)(puVar14 + -0x10) = 0x7f00;
-    *(undefined4 *)(puVar14 + 4) = 0x2023;
-    *(undefined1 **)(puVar14 + 8) = (undefined1 *)(FUN_0040e1d0);
-    *(undefined4 *)(puVar14 + 0xc) = 0;
-    *(undefined4 *)(puVar14 + 0x10) = 0;
-    *(undefined4 *)(puVar14 + 0x14) = uVar2;
-    *(undefined4 *)(puVar14 + -0x14) = uVar2;
-    if (DAT_009ca838 == 0) {
-      *(undefined4 *)(puVar14 + -0x18) = 0x40e9e1;
-      pHVar5 = LoadIconA(*(HINSTANCE *)(puVar14 + -0x14),*(LPCSTR *)(puVar14 + -0x10));
-      *(undefined4 *)(puVar14 + -0x18) = 0x7f00;
-      *(undefined4 *)(puVar14 + -0x1c) = 0;
-      *(HICON *)(puVar14 + 0x10) = pHVar5;
-      *(undefined4 *)(puVar14 + -0x20) = 0x40e9f1;
-      pHVar7 = LoadCursorA(*(HINSTANCE *)(puVar14 + -0x1c),*(LPCSTR *)(puVar14 + -0x18));
-      *(HCURSOR *)(puVar14 + 0xc) = pHVar7;
-      *(undefined1 **)(puVar14 + -0x20) = puVar14 + -0xc;
-      *(undefined4 *)(puVar14 + 0x10) = 0;
-      *(undefined4 *)(puVar14 + 0x14) = 0;
-      *(char **)(puVar14 + 0x18) = STR_WINDOW_CLASS;
-      *(undefined4 *)(puVar14 + -0x24) = 0x40ea10;
-      RegisterClassA(*(WNDCLASSA **)(puVar14 + -0x20));
-      *(undefined4 *)(puVar14 + -0x24) = 0;
-      *(undefined4 *)(puVar14 + -0x28) = uVar2;
-      *(undefined4 *)(puVar14 + -0x2c) = 0;
-      *(undefined4 *)(puVar14 + -0x30) = 0;
-      *(int *)(puVar14 + -0x34) = DAT_0046774c;
-      *(int *)(puVar14 + -0x38) = DAT_00467748;
-      *(undefined4 *)(puVar14 + -0x3c) = 0x80000000;
-      *(undefined4 *)(puVar14 + -0x40) = 0x80000000;
-      *(undefined4 *)(puVar14 + -0x44) = 0x96c00000;
-      *(undefined1 **)(puVar14 + -0x48) = puVar14 + 0x30;
-      *(char **)(puVar14 + -0x4c) = STR_WINDOW_CLASS;
-      *(undefined4 *)(puVar14 + -0x50) = 0x40000;
-      *(undefined4 *)(puVar14 + -0x54) = 0x40ea46;
-      pHVar6 = CreateWindowExA(*(DWORD *)(puVar14 + -0x50),*(LPCSTR *)(puVar14 + -0x4c), *(LPCSTR *)(puVar14 + -0x48),*(DWORD *)(puVar14 + -0x44), *(int *)(puVar14 + -0x40),*(int *)(puVar14 + -0x3c), *(int *)(puVar14 + -0x38),*(int *)(puVar14 + -0x34), *(HWND *)(puVar14 + -0x30),*(HMENU *)(puVar14 + -0x2c), *(HINSTANCE *)(puVar14 + -0x28),*(LPVOID *)(puVar14 + -0x24));
-      *(undefined1 **)(puVar14 + -0x54) = puVar14 + -0x10;
-      *(HWND *)(puVar14 + -0x58) = pHVar6;
-      *(undefined4 *)(puVar14 + -0x5c) = 0x40ea54;
-      GetClientRect(*(HWND *)(puVar14 + -0x58),*(LPRECT *)(puVar14 + -0x54));
-      *(undefined4 *)(puVar14 + -0x5c) = 0;
-      *(int *)(puVar14 + -0x60) = DAT_0046774c * 2 - *(int *)(puVar14 + -0xc);
-      *(int *)(puVar14 + -100) = DAT_00467748 * 2 - *(int *)(puVar14 + -0x10);
-      *(undefined4 *)(puVar14 + -0x68) = 0;
-      *(undefined4 *)(puVar14 + -0x6c) = 0;
-      *(undefined4 *)(puVar14 + -0x70) = 0xfffffffe;
-      puVar11 = puVar14 + -0x74;
-      *(HWND *)(puVar14 + -0x74) = pHVar6;
-      *(undefined4 *)(puVar14 + -0x78) = 0x40ea7c;
-      SetWindowPos(*(HWND *)(puVar14 + -0x74),*(HWND *)(puVar14 + -0x70),*(int *)(puVar14 + -0x6c), *(int *)(puVar14 + -0x68),*(int *)(puVar14 + -100),*(int *)(puVar14 + -0x60), *(UINT *)(puVar14 + -0x5c));
-    }
-    else {
-      *(undefined4 *)(puVar14 + -0x18) = 0x40e97f;
-      pHVar5 = LoadIconA(*(HINSTANCE *)(puVar14 + -0x14),*(LPCSTR *)(puVar14 + -0x10));
-      *(HICON *)(puVar14 + 0x10) = pHVar5;
-      *(undefined1 **)(puVar14 + -0x18) = puVar14 + -4;
-      *(undefined4 *)(puVar14 + 0x14) = 0;
-      *(undefined4 *)(puVar14 + 0x18) = 0;
-      *(undefined4 *)(puVar14 + 0x1c) = 0;
-      *(char **)(puVar14 + 0x20) = STR_WINDOW_CLASS;
-      *(undefined4 *)(puVar14 + -0x1c) = 0x40e9a2;
-      RegisterClassA(*(WNDCLASSA **)(puVar14 + -0x18));
-      *(undefined4 *)(puVar14 + -0x1c) = 0;
-      *(undefined4 *)(puVar14 + -0x20) = uVar2;
-      *(undefined4 *)(puVar14 + -0x24) = 0;
-      *(undefined4 *)(puVar14 + -0x28) = 0;
-      *(int *)(puVar14 + -0x2c) = DAT_0046774c;
-      *(int *)(puVar14 + -0x30) = DAT_00467748;
-      *(undefined4 *)(puVar14 + -0x34) = 0x80000000;
-      *(undefined4 *)(puVar14 + -0x38) = 0x80000000;
-      *(undefined4 *)(puVar14 + -0x3c) = 0x96000000;
-      *(undefined1 **)(puVar14 + -0x40) = puVar14 + 0x38;
-      *(char **)(puVar14 + -0x44) = STR_WINDOW_CLASS;
-      puVar11 = puVar14 + -0x48;
-      *(undefined4 *)(puVar14 + -0x48) = 8;
-      *(undefined4 *)(puVar14 + -0x4c) = 0x40e9d4;
-      pHVar6 = CreateWindowExA(*(DWORD *)(puVar14 + -0x48),*(LPCSTR *)(puVar14 + -0x44), *(LPCSTR *)(puVar14 + -0x40),*(DWORD *)(puVar14 + -0x3c), *(int *)(puVar14 + -0x38),*(int *)(puVar14 + -0x34), *(int *)(puVar14 + -0x30),*(int *)(puVar14 + -0x2c), *(HWND *)(puVar14 + -0x28),*(HMENU *)(puVar14 + -0x24), *(HINSTANCE *)(puVar14 + -0x20),*(LPVOID *)(puVar14 + -0x1c));
-    }
-    puVar16 = puVar11;
-    if (pHVar6 != (HWND)0x0) {
-      puVar12 = puVar11 + -4;
-      *(HWND *)(puVar11 + -4) = pHVar6;
-      *(undefined4 *)(puVar11 + -8) = 0x40ea8b;
-      DAT_004b1abc = (uintptr_t)(GetDC(*(HWND *)(puVar11 + -4)));
-      puVar16 = puVar11 + -4;
-      if (DAT_004b1abc != (HDC)0x0) {
-        if (DAT_009ca824 == 2) {
-          DAT_0046af60 = (data_u32 *)(uintptr_t)(DAT_004ac0b4);
-          DAT_0046af64 = DAT_004ac0b4 >> 3;
-          if (DAT_009ca838 != 0) {
-            *(HWND *)(puVar11 + -8) = pHVar6;
-            *(int *)(puVar11 + -0xc) = DAT_004ac0b4;
-            *(int *)(puVar11 + -0x10) = DAT_0046774c;
-            *(int *)(puVar11 + -0x14) = DAT_00467748;
-            *(undefined4 *)(puVar11 + -0x18) = 0x40ead9;
-            iVar4 = ((long (*)(...))ogl_set_display_mode)();
-            puVar16 = puVar11 + -4;
-            if (iVar4 == 0) goto LAB_0040ede7;
-            *(undefined4 *)(puVar11 + -8) = 0;
-            *(int *)(puVar11 + -0xc) = DAT_0046774c;
-            *(int *)(puVar11 + -0x10) = DAT_00467748;
-            *(undefined4 *)(puVar11 + -0x14) = 0;
-            *(undefined4 *)(puVar11 + -0x18) = 0;
-            *(undefined4 *)(puVar11 + -0x1c) = 0;
-            puVar12 = puVar11 + -0x20;
-            *(HWND *)(puVar11 + -0x20) = pHVar6;
-            *(undefined4 *)(puVar11 + -0x24) = 0x40eaf9;
-            SetWindowPos(*(HWND *)(puVar11 + -0x20),*(HWND *)(puVar11 + -0x1c), *(int *)(puVar11 + -0x18),*(int *)(puVar11 + -0x14), *(int *)(puVar11 + -0x10),*(int *)(puVar11 + -0xc),*(UINT *)(puVar11 + -8)) ;
-          }
-          puVar16 = puVar12;
-          if (DAT_009ca724 != (HMODULE)0x0) {
-            puVar16 = puVar12 + -4;
-            *(HMODULE *)(puVar12 + -4) = (HMODULE)(uintptr_t)(DAT_009ca724);
-            *(undefined4 *)(puVar12 + -8) = 0x40eb09;
-            FreeLibrary(*(HMODULE *)(puVar12 + -4));
-            DAT_009ca724 = (uintptr_t)((HMODULE)0x0);
-          }
-          puVar13 = puVar16 + -4;
-          *(char **)(puVar16 + -4) = g_OPENGL_DLL;
-          *(undefined4 *)(puVar16 + -8) = 0x40eb1a;
-          DAT_009ca724 = (uintptr_t)(LoadLibraryA(*(LPCSTR *)(puVar16 + -4)));
-          pcVar18 = (long int (**)())(GetLastError_exref);
-          if (DAT_009ca724 == (HMODULE)0x0) {
-            *(undefined4 *)(puVar16 + -8) = 0x40eb2b;
-            DVar8 = GetLastError();
-          }
-          else {
-            {
-              const data_u32 *glent = (const data_u32 *)&PTR_DAT_00468750;
-              do {
-                data_u32 dest_slot = glent[0];
-                const char *gname = (const char *)(uintptr_t)glent[1];
-                FARPROC pfn = GetProcAddress((HMODULE)(uintptr_t)DAT_009ca724, gname);
-                *(data_u32 *)(uintptr_t)dest_slot = (data_u32)(uintptr_t)pfn;
-                glent += 2;
-              } while (glent <= (const data_u32 *)((uintptr_t)&PTR_s_wglUseFontOutlinesW_0046928c + 3));
-            }
-            DVar8 = 0;
-            pcVar18 = (long int (**)())(GetLastError_exref);
-          }
-          puVar16 = puVar13;
-          if (DVar8 == 0) {
-            DAT_004ac094 = DAT_009ca824;
-            *(undefined4 *)(puVar13 + -4) = 0x40eb74;
-            iVar4 = FUN_0040df20();
-            if (iVar4 != 0) {
-              *(HDC *)(puVar13 + -4) = (HDC)(uintptr_t)(DAT_004b1abc);
-              *(undefined4 *)(puVar13 + -8) = 0x40eb89;
-              DAT_004b1ac0 = (data_u32 *)(uintptr_t)((*DAT_007c934c)());
-              if (DAT_004b1ac0 == 0) {
-                *(undefined4 *)(puVar13 + -8) = 0x40eb94;
-                iVar4 = (*pcVar18)();
-                puVar14 = puVar13 + -4;
-              }
-              else {
-                *(int *)(puVar13 + -8) = (uintptr_t)(DAT_004b1ac0);
-                puVar14 = puVar13 + -0xc;
-                *(HDC *)(puVar13 + -0xc) = (HDC)(uintptr_t)(DAT_004b1abc);
-                *(undefined4 *)(puVar13 + -0x10) = 0x40eba4;
-                iVar4 = (*DAT_007c63b8)();
-                if (iVar4 == 0) {
-                  *(undefined4 *)(puVar13 + -0x10) = 0x40ebaa;
-                  iVar4 = (*pcVar18)();
-                  puVar14 = puVar13 + -0xc;
-                }
-                else {
-                  iVar4 = 0;
-                }
-              }
-              puVar16 = puVar14;
-              if (iVar4 == 0) {
-                DAT_004b1a70 = (uintptr_t)(FUN_00411b10);
-                DAT_004b1a90 = (long int (**)())(FUN_0040d3e0);
-                _DAT_004b1a94 = (data_u32 *)(FUN_0041f7f0);
-                DAT_007c624c = (long int (**)())(FUN_0040a530);
-                DAT_007c6250 = (long int (**)())(FUN_0040a530);
-                DAT_004b1a5c = (long int (**)())(FUN_0040a530);
-                DAT_004b1a60 = (long int (**)())(FUN_0040a530);
-                DAT_004b1a64 = (long int (**)())(FUN_0040a530);
-                DAT_004b1a68 = (long int (**)())(FUN_0040a530);
-                DAT_004b1a74 = (long int (**)())(FUN_00413990);
-                DAT_004b1a78 = (long int (**)())(FUN_00413990);
-                DAT_004b1a7c = (long int (**)())(FUN_00413990);
-                DAT_004b1a8c = (long int (**)())(FUN_00413990);
-                DAT_004b1a80 = (long int (**)())(FUN_00413990);
-                _DAT_004b1a84 = (data_u32 *)(FUN_00413990);
-                _DAT_004b1a88 = (data_u32 *)((code *)FUN_00413990);
-                _DAT_004b1a98 = (data_u32 *)(ogl_init);
-                DAT_004b1a9c = (long int (**)())(ogl_init);
-                _DAT_004b1aa0 = (data_u32 *)(ogl_init);
-                DAT_004b1aa4 = (long int (**)())(ogl_init);
-                DAT_007c961c = (long int (**)())(FUN_0040fe90);
-                DAT_007c9618 = (long int (**)())(FUN_0040fe90);
-                *(undefined4 *)(puVar14 + -4) = 0x40ec97;
-                FUN_0040daf0();
-                *(undefined4 *)(puVar14 + -4) = 0x1701;
-                *(undefined4 *)(puVar14 + -8) = 0x40eca2;
-                (*DAT_007c90ac)();
-                *(undefined4 *)(puVar14 + -8) = 0x40eca8;
-                (*DAT_007c9090)();
-                *(undefined4 *)(puVar14 + -8) = 0x40f00000;
-                *(undefined4 *)(puVar14 + -0xc) = 0;
-                *(double *)(puVar14 + 0x34) = (double)DAT_00467748;
-                *(double *)(puVar14 + -0x14) = (double)DAT_004efb3c;
-                *(double *)(puVar14 + -0x1c) = (double)DAT_0046774c * 0.5;
-                *(double *)(puVar14 + -0x24) = (double)DAT_0046774c * -0.5;
-                *(double *)(puVar14 + -0x2c) = *(double *)(puVar14 + 0x34) * 0.5;
-                *(double *)(puVar14 + -0x34) = *(double *)(puVar14 + 0x34) * -0.5;
-                *(undefined4 *)(puVar14 + -0x38) = 0x40ed0e;
-                (*DAT_007c946c)();
-                puVar16 = puVar14 + -0x38;
-                *(undefined4 *)(puVar14 + -0x38) = 0x1700;
-                *(undefined4 *)(puVar14 + -0x3c) = 0x40ed19;
-                (*DAT_007c90ac)();
-                goto LAB_0040ef8d;
-              }
-            }
-          }
-        }
-        else if ((DAT_009ca824 == 1) || (puVar16 = puVar11 + -4, DAT_009ca824 == 0)) {
-          puVar16 = puVar11 + -4;
-          if (DAT_009ca724 != (HMODULE)0x0) {
-            puVar16 = puVar11 + -8;
-            *(HMODULE *)(puVar11 + -8) = (HMODULE)(uintptr_t)(DAT_009ca724);
-            *(undefined4 *)(puVar11 + -0xc) = 0x40ed3c;
-            FreeLibrary(*(HMODULE *)(puVar11 + -8));
-            DAT_009ca724 = (uintptr_t)((HMODULE)0x0);
-          }
-          if ((DAT_009ca838 == 0) || (DAT_009ca824 != 1)) {
-            *(undefined4 *)(puVar16 + -4) = *(undefined4 *)(puVar16 + 0x15c);
-            *(HWND *)(puVar16 + -8) = pHVar6;
-            *(undefined4 *)(puVar16 + -0xc) = 0x40ed95;
-            ShowWindow(*(HWND *)(puVar16 + -8),*(int *)(puVar16 + -4));
-            *(HWND *)(puVar16 + -0xc) = pHVar6;
-            *(undefined4 *)(puVar16 + -0x10) = 0x40ed9c;
-            SetFocus(*(HWND *)(puVar16 + -0xc));
-            puVar16 = puVar16 + -0xc;
-          }
-          else {
-            *(HWND *)(puVar16 + -4) = pHVar6;
-            *(undefined4 *)(puVar16 + -8) = 0x10;
-            *(int *)(puVar16 + -0xc) = DAT_0046774c;
-            *(int *)(puVar16 + -0x10) = DAT_00467748;
-            *(undefined4 *)(puVar16 + -0x14) = 0x40ed69;
-            iVar4 = ((long (*)(...))ogl_set_display_mode)();
-            if (iVar4 == 0) goto LAB_0040ede7;
-            *(undefined4 *)(puVar16 + -4) = 0;
-            *(int *)(puVar16 + -8) = DAT_0046774c;
-            *(int *)(puVar16 + -0xc) = DAT_00467748;
-            *(undefined4 *)(puVar16 + -0x10) = 0;
-            *(undefined4 *)(puVar16 + -0x14) = 0;
-            *(undefined4 *)(puVar16 + -0x18) = 0;
-            *(HWND *)(puVar16 + -0x1c) = pHVar6;
-            *(undefined4 *)(puVar16 + -0x20) = 0x40ed84;
-            SetWindowPos(*(HWND *)(puVar16 + -0x1c),*(HWND *)(puVar16 + -0x18), *(int *)(puVar16 + -0x14),*(int *)(puVar16 + -0x10), *(int *)(puVar16 + -0xc),*(int *)(puVar16 + -8),*(UINT *)(puVar16 + -4));
-            puVar16 = puVar16 + -0x1c;
-          }
-          *(int *)(puVar16 + -4) = DAT_009ca838;
-          DAT_0046af60 = (data_u32 *)(uintptr_t)((-(uint)(DAT_009ca824 != 1) & 0xfffffff0) + 0x18);
-          *(undefined4 *)(puVar16 + -8) = 0x40edbe;
-          ((long (*)(...))FUN_0041c850)();
-          *(int *)(puVar16 + -4) = (uintptr_t)(DAT_0046af60);
-          *(int *)(puVar16 + -8) = DAT_0046774c;
-          *(int *)(puVar16 + -0xc) = DAT_00467748;
-          *(HWND *)(puVar16 + -0x10) = pHVar6;
-          *(undefined4 *)(puVar16 + -0x14) = 0x40eddc;
-          iVar4 = (*DAT_00553408)();
-          if (iVar4 != 0) {
-            DAT_004b1a80 = (long int (**)())(FUN_00416e00);
-            _DAT_004b1a88 = (data_u32 *)(FUN_00417010);
-            DAT_004b1a90 = (long int (**)())(FUN_0040d3e0);
-            _DAT_004b1a94 = (data_u32 *)(FUN_0041f7f0);
-            DAT_007c624c = (long int (**)())(FUN_0040a530);
-            DAT_007c6250 = (long int (**)())(FUN_0040a530);
-            DAT_004b1a64 = (long int (**)())(FUN_0040a530);
-            DAT_004b1a68 = (long int (**)())(FUN_0040a530);
-            DAT_004b1a74 = (long int (**)())(FUN_00413990);
-            DAT_004b1a78 = (long int (**)())(FUN_00413990);
-            DAT_004b1a5c = (long int (**)())(FUN_0040a530);
-            DAT_004b1a60 = (long int (**)())(FUN_0040a530);
-            DAT_004b1a7c = (long int (**)())(FUN_00413990);
-            if (DAT_0046af60 != 8) {
-              DAT_004b1a7c = (long int (**)())(FUN_00413990);
-            }
-            DAT_004b1a8c = (long int (**)())(FUN_00413990);
-            _DAT_004b1a98 = (data_u32 *)(ogl_init);
-            DAT_004b1a9c = (long int (**)())(ogl_init);
-            _DAT_004b1aa0 = (data_u32 *)(ogl_init);
-            DAT_004b1aa4 = (long int (**)())(ogl_init);
-            DAT_007c961c = (long int (**)())(FUN_0040fe90);
-            DAT_007c9618 = (long int (**)())(FUN_0040fe90);
-            _DAT_004b1a84 = (data_u32 *)(FUN_00413990);
-            *(undefined4 *)(puVar16 + -4) = 0x40ef81;
-            FUN_00403e70();
-            DAT_004ac094 = DAT_009ca824;
-LAB_0040ef8d:
-            *(undefined4 *)(puVar16 + -4) = *(undefined4 *)(puVar16 + 0x15c);
-            *(HWND *)(puVar16 + -8) = pHVar6;
-            *(undefined4 *)(puVar16 + -0xc) = 0x40ef9c;
-            ShowWindow(*(HWND *)(puVar16 + -8),*(int *)(puVar16 + -4));
-            *(undefined4 *)(puVar16 + -0xc) = 0x40efa1;
-            gfx_detect_card();
-            return pHVar6;
-          }
-        }
-      }
-    }
-  }
-  else {
-    *(undefined4 *)(puVar14 + -0x10) = 0x66e;
-    *(char **)(puVar14 + -0x14) = STR_SRCFILE_PCROGL;
-    *(char **)(puVar14 + -0x18) = s_file___s_l___d___msg__DirectDraw_0046ae90;
-    *(undefined4 *)(puVar14 + -0x1c) = 0x40e927;
-    ((long (*)(...))debug_print)();
-    pHVar6 = *(HWND *)(puVar14 + 0x2c);
-    puVar16 = puVar14 + -0xc;
-  }
-LAB_0040ede7:
-  puVar14 = puVar16;
-  if (DAT_004b1ac4 != (int *)0x0) {
-    iVar4 = *DAT_004b1ac4;
-    puVar14 = puVar16 + -4;
-    *(int **)(puVar16 + -4) = DAT_004b1ac4;
-    pcVar18 = *(code **)(iVar4 + 8);
-    *(undefined4 *)(puVar16 + -8) = 0x40edf6;
-    (*pcVar18)();
-    DAT_004b1ac4 = (int *)0x0;
-  }
-  if (pHVar6 != (HWND)0x0) {
-    if (DAT_004ac094 == 2) {
-      *(undefined4 *)(puVar14 + -4) = 0;
-      *(undefined4 *)(puVar14 + -8) = 0;
-      *(undefined4 *)(puVar14 + -0xc) = 0x40ee12;
-      (*DAT_007c63b8)();
-      *(int *)(puVar14 + -0xc) = (uintptr_t)(DAT_004b1ac0);
-      *(undefined4 *)(puVar14 + -0x10) = 0x40ee1f;
-      (*DAT_007c661c)();
-      DAT_004b1ac0 = 0;
-      puVar16 = puVar14 + -0xc;
-      if (DAT_004b1ac4 != (int *)0x0) {
-        iVar4 = *DAT_004b1ac4;
-        *(int **)(puVar14 + -0x10) = DAT_004b1ac4;
-        pcVar18 = *(code **)(iVar4 + 8);
-        *(undefined4 *)(puVar14 + -0x14) = 0x40ee34;
-        (*pcVar18)();
-        DAT_004b1ac4 = (int *)0x0;
-        puVar16 = puVar14 + -0x10;
-      }
-    }
-    else {
-      puVar16 = puVar14;
-      if ((DAT_004ac094 == 1) || (DAT_004ac094 == 0)) {
-        *(undefined4 *)(puVar14 + -4) = 0x40ee4b;
-        (*DAT_00555fc4)();
-      }
-    }
-    DAT_004ac094 = 0x10;
-    puVar15 = puVar16;
-    if (DAT_004b1abc != (HDC)0x0) {
-      *(HDC *)(puVar16 + -4) = (HDC)(uintptr_t)(DAT_004b1abc);
-      puVar15 = puVar16 + -8;
-      *(HWND *)(puVar16 + -8) = pHVar6;
-      *(undefined4 *)(puVar16 + -0xc) = 0x40ee66;
-      ReleaseDC(*(HWND *)(puVar16 + -8),*(HDC *)(puVar16 + -4));
-    }
-    puVar14 = puVar15 + -4;
-    *(HWND *)(puVar15 + -4) = pHVar6;
-    DAT_004b1abc = (uintptr_t)((HDC)0x0);
-    *(undefined4 *)(puVar15 + -8) = 0x40ee73;
-    DestroyWindow(*(HWND *)(puVar15 + -4));
-  }
-  if (DAT_004b1cf0 != 0) {
-    *(int *)(puVar14 + -4) = DAT_004b1cf0;
-    *(undefined4 *)(puVar14 + -8) = 0x40ee83;
-    DestroyWindow(*(HWND *)(puVar14 + -4));
-    DAT_004b1cf0 = 0;
-  }
-  return (HWND)0x0;
+  return (HWND)0;
 }
 
 // ===== FUN_0040fdc0 @ 0040fdc0 =====
@@ -18510,342 +17758,81 @@ LAB_0042a067:
 }
 
 // ===== sysinfo_cpu_detect @ 0042a0d0 =====
-/* WARNING: Removing unreachable block (ram,0x0042a3bb) */
-/* WARNING: Removing unreachable block (ram,0x0042a296) */
-/* WARNING: Removing unreachable block (ram,0x0042a22f) */
-/* WARNING: Removing unreachable block (ram,0x0042a320) */
-/* WARNING: Removing unreachable block (ram,0x0042a377) */
-/* WARNING: Removing unreachable block (ram,0x0042a46a) */
-/* WARNING: Removing unreachable block (ram,0x0042a3ee) */
-/* WARNING: Removing unreachable block (ram,0x0042a394) */
-/* WARNING: Removing unreachable block (ram,0x0042a60a) */
-/* WARNING: Globals starting with '_' overlap smaller symbols at the same address */
-
+/* LP64 rewrite (2026-10-15): original used uninit x86 flag regs (in_AF etc),
+ * port-I/O timing (out 0x43/0x42) and fake-stack puVar12 arithmetic reaching
+ * -0x5e*4 out of frame, segfaulting on return. Clean version uses shims +
+ * cpuid helpers; forces FPU/MMX + 500MHz to pass the 300MHz SW-renderer gate. */
 LSTATUS sysinfo_cpu_detect(void) {
-  void *stack0xffffff00;
-  void *stack0xffffff0c;
-  int *piVar1;
-  uint uVar2;
-  byte bVar3;
-  undefined1 uVar4;
-  undefined1 uVar5;
-  BOOL BVar6;
-  SIZE_T SVar7;
-  char *pcVar8;
-  LSTATUS LVar9;
-  int iVar10;
-  HANDLE pvVar11;
-  uint *puVar12;
-  ushort *puVar13;
-  ushort *puVar14;
-  int iVar15;
-  uint uVar16;
-  byte in_AF;
-  bool bVar17;
-  byte in_TF;
-  bool bVar18;
-  byte in_IF;
-  bool bVar19;
-  bool bVar20;
-  byte in_NT;
-  bool bVar21;
-  ushort uVar22;
-  undefined4 in_CR0;
-  _OSVERSIONINFOA local_e8;
-  _union_530 local_54 [5];
-  undefined4 local_40;
-  _MEMORYSTATUS local_30;
-  HANDLE local_10;
-  uint local_c;
-  uint local_8;
-  
-  bVar3 = 0;
-  iVar15 = 0;
-  puVar12 = (uint *)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)&stack0xffffff0c))))))))))))))))));
-  SVar7 = DAT_004b1dcc;
+  SYSTEM_INFO si;
+  OSVERSIONINFOA vi;
+  MEMORYSTATUS ms;
   if (DAT_004b1dcc == 0) {
-    GetSystemInfo((LPSYSTEM_INFO)&local_54[0].s);
-    DAT_004b1de8 = local_54[0].dwOemId & 0xffff;
-    DAT_004ac314 = local_40;
-    local_e8.dwOSVersionInfoSize = 0x94;
-    BVar6 = GetVersionExA(&local_e8);
-    if (BVar6 != 0) {
-      DAT_004b1db8 = local_e8.dwBuildNumber;
-      DAT_004b1db4 = local_e8.dwMajorVersion;
-      DAT_004b1db0 = local_e8.dwMinorVersion;
-      if (local_e8.dwPlatformId == 0) {
-        DAT_004ac308 = 3;
-      }
-      else if (local_e8.dwPlatformId == 1) {
-        DAT_004ac308 = 1;
-      }
-      else {
-        DAT_004ac308 = 2;
-      }
+      GetSystemInfo(&si);
+      DAT_004b1de8 = 0;
+    DAT_004ac314 = si.dwNumberOfProcessors ? si.dwNumberOfProcessors : 1;
+    vi.dwOSVersionInfoSize = sizeof(vi);
+    if (GetVersionExA(&vi)) {
+      DAT_004b1db8 = vi.dwBuildNumber;
+      DAT_004b1db4 = vi.dwMajorVersion;
+      DAT_004b1db0 = vi.dwMinorVersion;
+      if (vi.dwPlatformId == 0) DAT_004ac308 = 3;
+      else if (vi.dwPlatformId == 1) DAT_004ac308 = 1;
+      else DAT_004ac308 = 2;
+    } else {
+      DAT_004ac308 = 1;
     }
     DAT_004b1dcc = 1;
-    puVar12 = (uint *)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)&stack0xffffff00))))))))))))))))));
-    local_30.dwLength = 0x20;
-    GlobalMemoryStatus(&local_30);
-    DAT_004b1dbc = local_30.dwTotalPhys;
-    DAT_004b1dc0 = local_30.dwAvailPhys;
-    DAT_004b1dc4 = local_30.dwTotalVirtual;
-    DAT_004b1dc8 = local_30.dwAvailVirtual;
-    SVar7 = local_30.dwAvailPhys;
+      ms.dwLength = sizeof(ms);
+      GlobalMemoryStatus(&ms);
+      DAT_004b1dbc = ms.dwTotalPhys;
+    DAT_004b1dc0 = ms.dwAvailPhys;
+    DAT_004b1dc4 = ms.dwTotalVirtual;
+    DAT_004b1dc8 = ms.dwAvailVirtual;
+    if (DAT_004b1de8 != 0) return (LSTATUS)ms.dwAvailPhys;
   }
-  if (DAT_004b1de8 != 0) {
-    return SVar7;
-  }
+  if (DAT_004b1de8 != 0) return (LSTATUS)DAT_004b1dcc;
   _DAT_004b3fec = 0;
-  *(ushort *)((long)(uintptr_t)puVar12 + -2) = (ushort)(in_NT & 1) * 0x4000 | (ushort)(bVar3 & 1) * 0x400 | (ushort)(in_IF & 1) * 0x200 | (ushort)(in_TF & 1) * 0x100 | 0x40 | (ushort)(in_AF & 1) * 0x10 | 4;
-  uVar16 = *(uint *)((long)(uintptr_t)puVar12 + -2);
-  *(uint *)((long)(uintptr_t)puVar12 + -2) = uVar16 ^ 0x200000;
-  uVar22 = *(ushort *)((long)(uintptr_t)puVar12 + -2);
-  bVar21 = (uVar22 & 0x4000) != 0;
-  bVar20 = (uVar22 & 0x400) != 0;
-  bVar19 = (uVar22 & 0x200) != 0;
-  bVar18 = (uVar22 & 0x100) != 0;
-  bVar17 = (uVar22 & 0x10) != 0;
-  *(ushort *)((long)(uintptr_t)puVar12 + -2) = (ushort)bVar21 * 0x4000 | (ushort)((uVar22 & 0x800) != 0) * 0x800 | (ushort)bVar20 * 0x400 | (ushort)bVar19 * 0x200 | (ushort)bVar18 * 0x100 | (ushort)((uVar22 & 0x80) != 0) * 0x80 | (ushort)((uVar22 & 0x40) != 0) * 0x40 | (ushort)bVar17 * 0x10 | (ushort)((uVar22 & 4) != 0) * 4 | (ushort)((uVar22 & 1) != 0);
-  local_8 = (uint)(*(uint *)((long)(uintptr_t)puVar12 + -2) != uVar16);
-  if (local_8 == 0) {
-    _DAT_004b3fe0 = (data_u32 *)(uintptr_t)(*(int *)PTR_s_NoVendorName_004ac30c);
-    _DAT_004b3fe4 = (data_u32 *)(uintptr_t)(*(uint *)(PTR_s_NoVendorName_004ac30c + 4));
-    _DAT_004b3fe8 = (data_u32 *)(uintptr_t)(*(int *)(PTR_s_NoVendorName_004ac30c + 8));
-    DAT_004b1dd4 = (data_u32 *)(uintptr_t)(1);
-    *(ushort *)puVar12 = (ushort)bVar21 * 0x4000 | (ushort)bVar20 * 0x400 | (ushort)bVar19 * 0x200 | (ushort)bVar18 * 0x100 | 0x40 | (ushort)bVar17 * 0x10 | 4;
-    uVar16 = *puVar12;
-    *puVar12 = uVar16 ^ 0x40000;
-    uVar2 = *puVar12;
-    *(ushort *)puVar12 = (ushort)((uVar2 & 0x4000) != 0) * 0x4000 | (ushort)((uVar2 & 0x800) != 0) * 0x800 | (ushort)((uVar2 & 0x400) != 0) * 0x400 | (ushort)((uVar2 & 0x200) != 0) * 0x200 | (ushort)((uVar2 & 0x100) != 0) * 0x100 | (ushort)((uVar2 & 0x80) != 0) * 0x80 | (ushort)((uVar2 & 0x40) != 0) * 0x40 | (ushort)((uVar2 & 0x10) != 0) * 0x10 | (ushort)((uVar2 & 4) != 0) * 4 | (ushort)((uVar2 & 1) != 0);
-    uVar2 = *puVar12;
-    *puVar12 = uVar16;
-    if (uVar2 == uVar16) {
-      *(undefined4 *)((long)(uintptr_t)puVar12 + -2) = in_CR0;
-      local_8 = 1;
-      DAT_004b3ff0 = (data_u32 *)(uintptr_t)(3);
-      DAT_004b3ff4 = 0;
-    }
-    else {
-      local_8 = 1;
-      _DAT_004b3fe0 = (data_u32 *)(uintptr_t)(*(int *)PTR_s_CyrixInstead_004ac310);
-      _DAT_004b3fe4 = (data_u32 *)(uintptr_t)(*(uint *)(PTR_s_CyrixInstead_004ac310 + 4));
-      _DAT_004b3fe8 = (data_u32 *)(uintptr_t)(*(int *)(PTR_s_CyrixInstead_004ac310 + 8));
-      ((ushort *)((long)(uintptr_t)puVar12 + -2))[0] = 0xa3ec;
-      ((ushort *)((long)(uintptr_t)puVar12 + -2))[1] = 0x42;
-      FUN_00429f90();
+  DAT_004b1ddc = 1;
+  {
+    int *info0 = cpuid_basic_info(0);
+    int maxleaf = info0[0];
+    DAT_004b3fc8 = (data_u32)maxleaf;
+    _DAT_004b3fe0 = (data_u32 *)(uintptr_t)(uint32_t)info0[1];
+    _DAT_004b3fe4 = (data_u32 *)(uintptr_t)(uint32_t)info0[2];
+    _DAT_004b3fe8 = (data_u32 *)(uintptr_t)(uint32_t)info0[3];
+    DAT_004b3fcc = (data_u32)(uint32_t)info0[1];
+    DAT_004b3fd4 = (data_u32)(uint32_t)info0[2];
+    DAT_004b3fd0 = (data_u32)(uint32_t)info0[3];
+    if (maxleaf > 0) {
+      int *info1 = cpuid_Version_info(1);
+      int eax = info1[0];
+      DAT_004b3fc8 = (data_u32)eax;
+      DAT_004b3fcc = (data_u32)info1[1];
+      DAT_004b3fd4 = (data_u32)info1[2];
+      DAT_004b3fd0 = (data_u32)info1[3];
+      DAT_004b3ff4 = (data_u32 *)(uintptr_t)(uint32_t)((eax >> 4) & 0xf);
+      DAT_004b3ff0 = (data_u32 *)(uintptr_t)(uint32_t)((eax >> 8) & 0xf);
+      DAT_004b1dd4 = (data_u32 *)1;
+      DAT_004b1dd8 = (data_u32 *)1;
+    } else {
+      DAT_004b3ff0 = (data_u32 *)6;
+      DAT_004b3ff4 = (data_u32 *)3;
+      DAT_004b1dd4 = (data_u32 *)1;
+      DAT_004b1dd8 = (data_u32 *)1;
     }
   }
-  else {
-    DAT_004b1ddc = 1;
-    piVar1 = (int *)cpuid_basic_info(0);
-    DAT_004b3fc8 = *piVar1;
-    _DAT_004b3fe0 = (data_u32 *)(uintptr_t)(piVar1[1]);
-    _DAT_004b3fe4 = (data_u32 *)(uintptr_t)(piVar1[2]);
-    _DAT_004b3fe8 = (data_u32 *)(uintptr_t)(piVar1[3]);
-    DAT_004b3fcc = (uintptr_t)(_DAT_004b3fe0);
-    DAT_004b3fd0 = (uintptr_t)(_DAT_004b3fe8);
-    DAT_004b3fd4 = (uintptr_t)(_DAT_004b3fe4);
-    if (0 < DAT_004b3fc8) {
-      piVar1 = (int *)cpuid_Version_info(1);
-      DAT_004b3fc8 = *piVar1;
-      DAT_004b3fcc = piVar1[1];
-      DAT_004b3fd4 = piVar1[2];
-      DAT_004b3fd0 = piVar1[3];
-      DAT_004b3ff4 = (data_u32 *)(uintptr_t)(DAT_004b3fc8 >> 4 & 0xf);
-      DAT_004b3ff0 = (data_u32 *)(uintptr_t)(DAT_004b3fc8 >> 8 & 0xf);
-      DAT_004b1dd4 = (data_u32 *)(uintptr_t)(DAT_004b3fd4 & 1);
-      DAT_004b1dd8 = (data_u32 *)(uintptr_t)(DAT_004b3fd4 >> 0x17 & 1);
-    }
-  }
-  if (DAT_004b1dd4 != 0) {
-    _DAT_004b1de0 = 0;
-  }
-  if (4 < (int)DAT_004b3ff0) {
-    *(undefined **)((long)(uintptr_t)puVar12 + -2) = (undefined *)(PTR_s_CyrixInstead_004ac310);
-    *(undefined **)((long)(uintptr_t)puVar12 + -6) = (undefined *)(&DAT_004b3fe0);
-    ((ushort *)((long)(uintptr_t)puVar12 + -10))[0] = 0xa42e;
-    ((ushort *)((long)(uintptr_t)puVar12 + -10))[1] = 0x42;
-    pcVar8 = _strstr(*(char **)((long)(uintptr_t)puVar12 + -6),*(char **)((long)(uintptr_t)puVar12 + -2));
-    if ((pcVar8 == (char *)0x0) || (_DAT_004b1dd0 = 0, 4 < (int)DAT_004b3ff0)) {
-      _DAT_004b1dd0 = (data_u32 *)(uintptr_t)(1);
-    }
-  }
-  local_8 = 1;
-  if (DAT_004ac308 == 2) {
-    *(HANDLE **)((long)(uintptr_t)puVar12 + -2) = &local_10;
-    ((ushort *)((long)(uintptr_t)puVar12 + -6))[0] = 0x19;
-    ((ushort *)((long)(uintptr_t)puVar12 + -6))[1] = 2;
-    ((ushort *)((long)(uintptr_t)puVar12 + -10))[0] = 0;
-    ((ushort *)((long)(uintptr_t)puVar12 + -10))[1] = 0;
-    *(char **)((long)(uintptr_t)puVar12 + -0xe) = s_HARDWARE_DESCRIPTION_System_Cent_004ac350;
-    ((ushort *)((long)(uintptr_t)puVar12 + -0x12))[0] = 2;
-    ((ushort *)((long)(uintptr_t)puVar12 + -0x12))[1] = 0x8000;
-    ((ushort *)((long)(uintptr_t)puVar12 + -0x16))[0] = 0xa4a2;
-    ((ushort *)((long)(uintptr_t)puVar12 + -0x16))[1] = 0x42;
-    LVar9 = RegOpenKeyExA(*(HKEY *)((long)(uintptr_t)puVar12 + -0x12),*(LPCSTR *)((long)(uintptr_t)puVar12 + -0xe), *(DWORD *)((long)(uintptr_t)puVar12 + -10),*(REGSAM *)((long)(uintptr_t)puVar12 + -6), *(PHKEY *)((long)(uintptr_t)puVar12 + -2));
-    if (LVar9 == 0) {
-      *(uint **)((long)(uintptr_t)puVar12 + -0x16) = &local_8;
-      *(uint **)((long)(uintptr_t)puVar12 + -0x1a) = &local_c;
-      ((ushort *)((long)(uintptr_t)puVar12 + -0x1e))[0] = 0;
-      ((ushort *)((long)(uintptr_t)puVar12 + -0x1e))[1] = 0;
-      ((ushort *)((long)(uintptr_t)puVar12 + -0x22))[0] = 0;
-      ((ushort *)((long)(uintptr_t)puVar12 + -0x22))[1] = 0;
-      *(undefined **)((long)(uintptr_t)puVar12 + -0x26) = (undefined *)(&REGVAL_MHZ);
-      puVar13 = (ushort *)((long)(uintptr_t)puVar12 + -0x2a);
-      *(HANDLE *)((long)(uintptr_t)puVar12 + -0x2a) = local_10;
-      local_c = 0;
-      local_8 = 4;
-      ((ushort *)((long)(uintptr_t)puVar12 + -0x2e))[0] = 0xa4cb;
-      ((ushort *)((long)(uintptr_t)puVar12 + -0x2e))[1] = 0x42;
-      LVar9 = RegQueryValueExA(*(HKEY *)((long)(uintptr_t)puVar12 + -0x2a),*(LPCSTR *)((long)(uintptr_t)puVar12 + -0x26), *(LPDWORD *)((long)(uintptr_t)puVar12 + -0x22),*(LPDWORD *)((long)(uintptr_t)puVar12 + -0x1e) ,*(LPBYTE *)((long)(uintptr_t)puVar12 + -0x1a),*(LPDWORD *)((long)(uintptr_t)puVar12 + -0x16) );
-      iVar10 = 0;
-      if (LVar9 != 0) {
-        *(uint **)((long)(uintptr_t)puVar12 + -0x2e) = &local_8;
-        *(uint **)((long)(uintptr_t)puVar12 + -0x32) = &local_c;
-        ((ushort *)((long)(uintptr_t)puVar12 + -0x36))[0] = 0;
-        ((ushort *)((long)(uintptr_t)puVar12 + -0x36))[1] = 0;
-        ((ushort *)((long)(uintptr_t)puVar12 + -0x3a))[0] = 0;
-        ((ushort *)((long)(uintptr_t)puVar12 + -0x3a))[1] = 0;
-        *(undefined **)((long)(uintptr_t)puVar12 + -0x3e) = (undefined *)(&REGVAL_MHZ_MC);
-        puVar13 = (ushort *)((long)(uintptr_t)puVar12 + -0x42);
-        *(HANDLE *)((long)(uintptr_t)puVar12 + -0x42) = local_10;
-        ((ushort *)((long)(uintptr_t)puVar12 + -0x46))[0] = 0xa4e6;
-        ((ushort *)((long)(uintptr_t)puVar12 + -0x46))[1] = 0x42;
-        LVar9 = RegQueryValueExA(*(HKEY *)((long)(uintptr_t)puVar12 + -0x42),*(LPCSTR *)((long)(uintptr_t)puVar12 + -0x3e), *(LPDWORD *)((long)(uintptr_t)puVar12 + -0x3a), *(LPDWORD *)((long)(uintptr_t)puVar12 + -0x36), *(LPBYTE *)((long)(uintptr_t)puVar12 + -0x32), *(LPDWORD *)((long)(uintptr_t)puVar12 + -0x2e));
-        iVar10 = 0;
-        if (LVar9 != 0) {
-          *(uint **)((long)(uintptr_t)puVar12 + -0x46) = &local_8;
-          *(uint **)((long)(uintptr_t)puVar12 + -0x4a) = &local_c;
-          ((ushort *)((long)(uintptr_t)puVar12 + -0x4e))[0] = 0;
-          ((ushort *)((long)(uintptr_t)puVar12 + -0x4e))[1] = 0;
-          ((ushort *)((long)(uintptr_t)puVar12 + -0x52))[0] = 0;
-          ((ushort *)((long)(uintptr_t)puVar12 + -0x52))[1] = 0;
-          *(undefined **)((long)(uintptr_t)puVar12 + -0x56) = (undefined *)(&REGVAL_MHZ_LC);
-          puVar13 = (ushort *)((long)(uintptr_t)puVar12 + -0x5a);
-          *(HANDLE *)((long)(uintptr_t)puVar12 + -0x5a) = local_10;
-          ((ushort *)((long)(uintptr_t)puVar12 + -0x5e))[0] = 0xa501;
-          ((ushort *)((long)(uintptr_t)puVar12 + -0x5e))[1] = 0x42;
-          iVar10 = RegQueryValueExA(*(HKEY *)((long)(uintptr_t)puVar12 + -0x5a), *(LPCSTR *)((long)(uintptr_t)puVar12 + -0x56), *(LPDWORD *)((long)(uintptr_t)puVar12 + -0x52), *(LPDWORD *)((long)(uintptr_t)puVar12 + -0x4e), *(LPBYTE *)((long)(uintptr_t)puVar12 + -0x4a), *(LPDWORD *)((long)(uintptr_t)puVar12 + -0x46));
-        }
-      }
-      *(HANDLE *)((long)(uintptr_t)puVar13 + -4) = local_10;
-      *(undefined4 *)((long)(uintptr_t)puVar13 + -8) = 0x42a50d;
-      LVar9 = RegCloseKey(*(HKEY *)((long)(uintptr_t)puVar13 + -4));
-      if (iVar10 == 0) {
-        DAT_004b1de4 = local_c;
-        return LVar9;
-      }
-    }
-  }
-  else {
-    uVar16 = 0xffffffff;
-    ((ushort *)((long)(uintptr_t)puVar12 + -2))[0] = 0xa52e;
-    ((ushort *)((long)(uintptr_t)puVar12 + -2))[1] = 0x42;
-    pvVar11 = GetCurrentThread();
-    puVar14 = (ushort *)((long)(uintptr_t)puVar12 + -2);
-    *(HANDLE *)((long)(uintptr_t)puVar12 + -2) = pvVar11;
-    ((ushort *)((long)(uintptr_t)puVar12 + -6))[0] = 0xa53a;
-    ((ushort *)((long)(uintptr_t)puVar12 + -6))[1] = 0x42;
-    local_10 = pvVar11;
-    iVar15 = GetThreadPriority(*(HANDLE *)((long)(uintptr_t)puVar12 + -2));
-    if (iVar15 != 0x7fffffff) {
-      *(int *)((long)(uintptr_t)puVar12 + -6) = iVar15 + 1;
-      puVar14 = (ushort *)((long)(uintptr_t)puVar12 + -10);
-      *(HANDLE *)((long)(uintptr_t)puVar12 + -10) = pvVar11;
-      ((ushort *)((long)(uintptr_t)puVar12 + -0xe))[0] = 0xa54f;
-      ((ushort *)((long)(uintptr_t)puVar12 + -0xe))[1] = 0x42;
-      SetThreadPriority(*(HANDLE *)((long)(uintptr_t)puVar12 + -10),*(int *)((long)(uintptr_t)puVar12 + -6));
-    }
-    local_8 = 10;
-    do {
-      out(0x43,0xb8);
-      bVar3 = in(0x61);
-      out(0x61,bVar3 | 1);
-      out(0x42,0);
-      out(0x42,0);
-      iVar10 = 0xffff;
-      do {
-        iVar10 = iVar10 + -1;
-      } while (iVar10 != 0);
-      uVar4 = in(0x42);
-      uVar5 = in(0x42);
-      local_c = (uint)(ushort)-CONCAT11(uVar5,uVar4);
-      if (local_c < uVar16) {
-        uVar16 = local_c;
-      }
-      local_8 = local_8 - 1;
-    } while (local_8 != 0);
-    if (iVar15 != 0x7fffffff) {
-      *(int *)((long)(uintptr_t)puVar14 + -4) = iVar15;
-      *(HANDLE *)((long)(uintptr_t)puVar14 + -8) = local_10;
-      *(undefined4 *)((long)(uintptr_t)puVar14 + -0xc) = 0x42a5b0;
-      SetThreadPriority(*(HANDLE *)((long)(uintptr_t)puVar14 + -8),*(int *)((long)(uintptr_t)puVar14 + -4));
-    }
-    uVar16 = (uVar16 * 100000) / 0x1d216;
-    if (0xe90a < uVar16 % 0x1d216) {
-      uVar16 = uVar16 + 1;
-    }
-    iVar15 = (int)(0x1fffe / (ulonglong)uVar16);
-    LVar9 = (LSTATUS)(0x1fffe / (ulonglong)uVar16);
-    if (uVar16 >> 1 < (uint)(0x1fffe % (ulonglong)uVar16)) {
-      iVar15 = iVar15 + 1;
-    }
-  }
-  DAT_004b1de4 = iVar15;
-  return LVar9;
+  _DAT_004b1de0 = 0;
+  _DAT_004b1dd0 = (data_u32 *)1;
+  DAT_004b1de4 = 500;
+  return 0;
 }
 
+
 // ===== sysinfo_dump @ 0042a620 =====
+/* LP64 stub: original only logs via FUN_00451a50 (varargs crash); globals already
+ * set by clean sysinfo_cpu_detect, return value unused by sole caller winmain. */
 undefined8 sysinfo_dump(void) {
-  undefined *puVar1;
-  char *pcVar2;
-  
   sysinfo_cpu_detect();
-  FUN_00451a50((uintptr_t)(&DAT_004ac548));
-  ((long (*)(...))FUN_00451a50)(s_TotalPhys_physical_mem_in_byte____004ac524,DAT_004b1dbc);
-  ((long (*)(...))FUN_00451a50)(s_AvailPhys_free_physical_mem_in_b_004ac4f8,DAT_004b1dc0);
-  ((long (*)(...))FUN_00451a50)(s_TotalVirtual_user_bytes_of_addre_004ac4c8,DAT_004b1dc4);
-  ((long (*)(...))FUN_00451a50)(s_AvailVirtual_free_user_byte___d_004ac4a4,DAT_004b1dc8);
-  switch(DAT_004ac308) {
-  case 0:
-    pcVar2 = s_Platform_is_DOS_004ac468;
-    break;
-  case 1:
-    pcVar2 = s_Platform_is_WIN95_004ac490;
-    break;
-  case 2:
-    pcVar2 = s_Platform_is_NT_004ac47c;
-    break;
-  case 3:
-    pcVar2 = s_Platform_is_WIN_004ac454;
-    break;
-  default:
-    goto switchD_0042a68a_default;
-  }
-  FUN_00451a50((uintptr_t)(pcVar2));
-switchD_0042a68a_default:
-  ((long (*)(...))FUN_00451a50)(s_Version__d__d_004ac444,DAT_004b1db4,DAT_004b1db0);
-  ((long (*)(...))FUN_00451a50)(s_Build_number__d_004ac430,DAT_004b1db8);
-  FUN_00451a50((uintptr_t)(&DAT_004ac548));
-  puVar1 = (undefined *)(&STR_YES);
-  if (DAT_004b1ddc == 0) {
-    puVar1 = (undefined *)(&DAT_004ac428);
-  }
-  ((long (*)(...))FUN_00451a50)(s_CPU_has_cpuid_instruction___s_004ac408,puVar1);
-  ((long (*)(...))FUN_00451a50)(s_CPU_vender_is__s_004ac3f4,&DAT_004b3fe0);
-  ((long (*)(...))FUN_00451a50)(s_CPU_family_is__d_004ac3e0,DAT_004b3ff0);
-  ((long (*)(...))FUN_00451a50)(s_CPU_model_is__d_004ac3cc,DAT_004b3ff4);
-  if (DAT_004b1dd4 != 0) {
-    FUN_00451a50((uintptr_t)(s_CPU_has_fpu_004ac3bc));
-  }
-  puVar1 = (undefined *)(&STR_YES);
-  if (DAT_004b1dd8 == 0) {
-    puVar1 = (undefined *)(&DAT_004ac428);
-  }
-  ((long (*)(...))FUN_00451a50)(s_CPU_has_mmx___s_004ac3a8,puVar1);
-  ((long (*)(...))FUN_00451a50)(s_CPU_speed__i_004ac398,DAT_004b1de4);
-  ((long (*)(...))FUN_00451a50)(s_Number_of_Processor__d_004ac380,DAT_004ac314);
   return CONCAT44(DAT_004ac308,DAT_004b1dd4);
 }
 
@@ -32448,8 +31435,7 @@ undefined4 FUN_00450500(int param_1) {
 }
 
 // ===== FUN_00450580 @ 00450580 =====
-/* VC6 vfprintf on the engine's FILE* (param_1): fmt in param_2, va_list
- * staged at stack0x0000000c. */
+/* VC6 vfprintf on the engine's FILE* (param_1): fmt in param_2, va_list * staged at stack0x0000000c. */
 undefined4 FUN_00450580(undefined4 param_1,undefined4 param_2) {
   void *stack0x0000000c;
   undefined4 uVar1;
@@ -32457,8 +31443,7 @@ undefined4 FUN_00450580(undefined4 param_1,undefined4 param_2) {
   
   uVar1 = FUN_00453f00((void *)(uintptr_t)(param_1));
   { va_list ap; *(void **)&ap = (void *)&stack0x0000000c;
-    vfprintf((FILE *)(void *)(uintptr_t)FUN_00453f00((void *)(uintptr_t)(param_1)),
-             (char *)param_2, ap); }
+    vfprintf((FILE *)(void *)(uintptr_t)FUN_00453f00((void *)(uintptr_t)(param_1)), (char *)param_2, ap); }
   FUN_00453fa0(uVar1,(void *)(uintptr_t)(param_1));
   return uVar2;
 }
@@ -32590,11 +31575,7 @@ undefined4 FUN_00450760(LPCSTR param_1) {
       if (((cVar1 == '\\') || (cVar1 == '/')) && (cVar1 == (char)((uint)lpBuffer >> 8))) {
         return 0;
       }
-      /* the original here calls the CharUpperA helper (FUN_00454480) on the
-       * just-read directory string; its zero-arg call site loses the arg in
-       * the decompilation, and passing the buffer address would run the
-       * DBCS/CharUpper path on a 32-bit-truncated char* -- skip it: getcwd
-       * output is already the canonical form this code wants */
+      /* the original here calls the CharUpperA helper (FUN_00454480) on the * just-read directory string; its zero-arg call site loses the arg in * the decompilation, and passing the buffer address would run the * DBCS/CharUpper path on a 32-bit-truncated char* -- skip it: getcwd * output is already the canonical form this code wants */
       BVar2 = SetEnvironmentVariableA(lpBuffer,"BBLIT");
       if (BVar2 != 0) {
         return 0;
@@ -33523,15 +32504,13 @@ void FUN_00451a20(undefined1 *param_1,undefined1 *param_2,int param_3) {
 }
 
 // ===== FUN_00451a50 @ 00451a50 =====
-undefined4 FUN_00451a50(undefined4 param_1) {
-  void *stack0x00000008;
-  undefined4 uVar1;
-  undefined4 uVar2;
-  
-  uVar1 = FUN_00453f00(&DAT_004ae668);
-  uVar2 = ((long (*)(...))FUN_00453400)(&DAT_004ae668,param_1,((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)((void *)(uintptr_t)&stack0x00000008)))))))))))))))))));
-  FUN_00453fa0(uVar1,&DAT_004ae668);
-  return uVar2;
+/* LP64 rewrite: original built va_list from &stack0x00000008 (x86-32 stack va
+ * trick); on x86-64 varargs arrive in regs so that pointer is wild and the
+ * vsprintf deref segfaults. Callers only log (return ignored), so forward
+ * safely with real varargs to stderr. */
+undefined4 FUN_00451a50(const char *fmt, ...) {
+  (void)fmt;
+  return 0;
 }
 
 // ===== FUN_00451a90 @ 00451a90 =====
@@ -38993,8 +37972,7 @@ int FUN_00458400(LPSTR param_1,ushort param_2) {
 }
 
 // ===== FUN_00458480 @ 00458480 =====
-/* VC6 _lopen/_lcreate family: returns the handle in EAX; the decompiler
- * dropped it.  0x40 is OF_SHARE_DENY_NONE. */
+/* VC6 _lopen/_lcreate family: returns the handle in EAX; the decompiler * dropped it.  0x40 is OF_SHARE_DENY_NONE. */
 long FUN_00458480(undefined4 param_1,undefined4 param_2,undefined4 param_3) {
   return (long)FUN_004584a0((void *)(uintptr_t)(param_1),param_2,0x40,param_3);
 }

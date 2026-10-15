@@ -31,7 +31,7 @@ DIAG = re.compile(r'^(\S+?):(\d+):(\d+):\s+(error|note|warning):\s*(.*)$')
 
 # ---------------------------------------------------------------- gcc driver
 def run_gcc():
-    r = subprocess.run(['gcc','-c','-Ilinux','-fno-diagnostics-show-caret',
+    r = subprocess.run(['gcc','-c','-std=gnu17','-Ilinux','-fno-diagnostics-show-caret',
                         GAME,'-o','/tmp/bblit_game.o'],
                        capture_output=True, text=True)
     return parse(r.stderr)
