@@ -38,7 +38,8 @@ $CC $CFLAGS -c linux/shim/winapi_stubs.c -o "$O/winapi_stubs.o"
 $CC $CFLAGS -c linux/shim/shim_crt.c     -o "$O/shim_crt.o"
 $CC $CFLAGS -c linux/shim/port_helpers.c -o "$O/port_helpers.o"
 $CC $CFLAGS -c linux/shim/gl_wgl.c         -o "$O/gl_wgl.o"
+$CC $CFLAGS -c linux/shim/glprobe.c         -o "$O/glprobe.o"
 $CC $LDFLAGS "$O"/bblit_game.o "$O"/data_syms.o "$O"/port_main.o \
-    "$O"/winapi_table.o "$O"/winapi_stubs.o "$O"/shim_crt.o "$O"/port_helpers.o "$O"/gl_wgl.o \
+    "$O"/winapi_table.o "$O"/winapi_stubs.o "$O"/shim_crt.o "$O"/port_helpers.o "$O"/gl_wgl.o "$O"/glprobe.o \
     -o "$O/bblit" -lm -lEGL -lGL
 echo "built $O/bblit with $CC"

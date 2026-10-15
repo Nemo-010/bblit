@@ -43098,7 +43098,7 @@ void *bblit_arena_sentinel[6] = {0};
  * mirrors the image dword for its address, zero-extended; reads
  * and writes go through the cell at full 64-bit width so neither
  * the neighbour nor a high function address is ever clobbered. */
-data_u32 *bblit_slot_cells[38] = {0};
+data_u32 *bblit_slot_cells[42] = {0};
 
 void bblit_port_init(void);
 void bblit_port_init(void)
@@ -43163,6 +43163,10 @@ void bblit_port_init(void)
     bblit_slot_cells[35] = (data_u32 *)(uintptr_t)*(volatile data_u32 *)0x004b3a98ul;
     bblit_slot_cells[36] = (data_u32 *)(uintptr_t)*(volatile data_u32 *)0x004b374cul;
     bblit_slot_cells[37] = (data_u32 *)(uintptr_t)*(volatile data_u32 *)0x004b3a00ul;
+    bblit_slot_cells[38] = (data_u32 *)(uintptr_t)*(volatile data_u32 *)0x004b18d8ul;
+    bblit_slot_cells[39] = (data_u32 *)(uintptr_t)*(volatile data_u32 *)0x004b18dcul;
+    bblit_slot_cells[40] = (data_u32 *)(uintptr_t)*(volatile data_u32 *)0x009ca9c0ul;
+    bblit_slot_cells[41] = (data_u32 *)(uintptr_t)*(volatile data_u32 *)0x004b39acul;
     /* Two phases: slots sit 4 bytes apart, so an in-place 8-byte
      * widening write clobbers the next slot's original value
      * (measured: 0x4ac30c's write zeroed 0x4ac310, whose needle

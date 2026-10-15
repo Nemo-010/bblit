@@ -539,7 +539,10 @@ FARPROC GetProcAddress(HMODULE m, LPCSTR name)
     if (getenv("BBLIT_DEBUG")) { write(2, "[gpaddr] ", 9); write(2, name, name ? strlen(name) : 5); write(2, "\n", 1); }
     {
         FARPROC w = (FARPROC)wgl_wrapper(name);
-        if (w) return w;
+        /* LP64: our wrappers live at 0x48.. (>4GB, non-PIE binary); the
+         * 4-byte image slots need sub-4GB trampolines (observed: raw
+         * wglCreateContext/wglMakeCurrent low32 -> SEGV under ASan). */
+        if (w) return (FARPROC)gl_trampoline(w);
     }
     void *s = dlsym((void *)m, name);
     if (s) return (FARPROC)gl_trampoline(s);
@@ -560,7 +563,7 @@ FARPROC GetProcAddress(HMODULE m, LPCSTR name)
         else if (!strcmp(name, "wglGetPixelFormat")) map = 0;
         else if (!strcmp(name, "wglShareLists")) map = "glXCreateContext";
         if (map) { s = dlsym(RTLD_DEFAULT, map); if (s) return (FARPROC)gl_trampoline(s); }
-        return (FARPROC)wgl_noop;   /* STUB-DIVERGENCE: font/layer helpers */
+        return (FARPROC)gl_trampoline((void *)wgl_noop);   /* STUB-DIVERGENCE: font/layer helpers */
     }
     return (FARPROC)gl_trampoline(dlsym((void *)m, name));
 }

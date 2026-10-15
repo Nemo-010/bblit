@@ -218,10 +218,10 @@ FARPROC wglGetProcAddress(LPCSTR name)
     FARPROC p;
     if (!name) return 0;
     p = (FARPROC)eglGetProcAddress(name);
-    if (p) return p;
+    if (p) return (FARPROC)gl_trampoline(p);
     /* gl* names also resolve here on Windows; cover them via libGL. */
     p = (FARPROC)dlsym(RTLD_DEFAULT, name);
-    return p;
+    return (FARPROC)gl_trampoline(p);
 }
 
 /* Sub-4GB trampolines: the image GL table stores 4-byte proc addresses,
@@ -476,6 +476,14 @@ void gl_table_sync(void)
         }
     }
 }
+/* DIAG-ONLY: side value + index for an image slot address. */
+int bblit_gl_side_for(unsigned dest, void **out) {
+    extern const unsigned gl_table_dests[360];
+    for (int i = 0; i < 360; i++)
+        if (gl_table_dests[i] == dest) { *out = gl_proc_side[i]; return i; }
+    return -1;
+}
+
 
 /* Callback side table: the 0x4b1a5c-0x4b1aa4 dispatch slots sit at
  * 4-byte stride but are read and written as 8-byte pointers, so

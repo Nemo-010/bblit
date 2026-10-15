@@ -18,7 +18,7 @@ extern data_u64 bblit_image_blob[BBLIT_BLOB_WORDS];
  * image slots (see the note at their sites below). */
 extern void *bblit_arena_sentinel[6];
 /* LP64 side-table cells for conflict slots (see above). */
-extern data_u32 *bblit_slot_cells[38];
+extern data_u32 *bblit_slot_cells[42];
 void bblit_port_init(void);
 
 /* ---- data symbol views (all at original addresses) ---- */
@@ -361,8 +361,8 @@ void bblit_port_init(void);
 #define DAT_004b18c4 (*(data_u32 **)0x004b18c4ul) /* DAT_004b18c4 */
 #define DAT_004b18c8 (*(data_u32 **)0x004b18c8ul) /* DAT_004b18c8 */
 #define DAT_004b18d0 (*(unsigned short *)0x004b18d0ul) /* DAT_004b18d0 */
-#define DAT_004b18d8 (*(data_u32 **)0x004b18d8ul) /* DAT_004b18d8 */
-#define _DAT_004b18dc (*(data_u32 **)0x004b18dcul) /* 004b18dc */
+#define DAT_004b18d8 (*(data_u32 **)&bblit_slot_cells[38]) /* DAT_004b18d8: cell (was overlapping 8B pair 18d8/18dc) */
+#define _DAT_004b18dc (*(data_u32 **)&bblit_slot_cells[39]) /* 004b18dc: cell */
 #define _DAT_004b18e8 (*(data_u32 **)0x004b18e8ul) /* 004b18e8 */
 #define _DAT_004b18f0 (*(data_u32 **)0x004b18f0ul) /* 004b18f0 */
 #define _DAT_004b18f4 (*(data_u32 **)0x004b18f4ul) /* 004b18f4 */
@@ -818,7 +818,7 @@ void bblit_port_init(void);
 #define DAT_004b399c (*(data_u32 *)0x004b399cul) /* DAT_004b399c */
 #define DAT_004b39a4 (*(data_u32 *)0x004b39a4ul) /* DAT_004b39a4 */
 #define DAT_004b39a8 (*(unsigned short *)0x004b39a8ul) /* DAT_004b39a8 */
-#define DAT_004b39ac (*(data_u32 **)0x004b39acul) /* DAT_004b39ac */
+#define DAT_004b39ac (*(data_u32 **)&bblit_slot_cells[41]) /* DAT_004b39ac: cell (8B load tore live 39b0 flag -> 0x100000000) */
 #define DAT_004b39b0 (*(unsigned short *)0x004b39b0ul) /* DAT_004b39b0 */
 #define DAT_004b39b2 (*(unsigned char *)0x004b39b2ul) /* DAT_004b39b2 */
 #define DAT_004b39b4 (*(data_u32 **)0x004b39b4ul) /* DAT_004b39b4 */
@@ -1023,14 +1023,14 @@ void bblit_port_init(void);
 #define DAT_0052fd40 (*(data_u32 **)0x0052fd40ul) /* DAT_0052fd40 */
 #define DAT_0052fd60 (*(data_u32 *)0x0052fd60ul) /* DAT_0052fd60 */
 #define DAT_0052fd64 (*(data_u32 *)0x0052fd64ul) /* DAT_0052fd64 */
-#define DAT_0052fd69 (*(data_u32 *)0x0052fd69ul) /* 0052fd69 */
-#define DAT_0052fd6a (*(data_u32 *)0x0052fd6aul) /* 0052fd6a */
-#define DAT_0052fd6b (*(data_u32 *)0x0052fd6bul) /* 0052fd6b */
-#define DAT_0052fd6c (*(data_u32 *)0x0052fd6cul) /* 0052fd6c */
-#define DAT_0052fd6e (*(data_u32 *)0x0052fd6eul) /* 0052fd6e */
-#define DAT_0052fd6f (*(data_u32 *)0x0052fd6ful) /* 0052fd6f */
-#define DAT_0052fd70 (*(data_u32 *)0x0052fd70ul) /* 0052fd70 */
-#define DAT_0052fd72 (*(data_u32 *)0x0052fd72ul) /* DAT_0052fd72 */
+#define DAT_0052fd69 (*(undefined1 *)0x0052fd69ul) /* 0052fd69: byte flags; asm mov al,[ecx+0x52fd69] */
+#define DAT_0052fd6a (*(undefined1 *)0x0052fd6aul) /* 0052fd6a: byte */
+#define DAT_0052fd6b (*(undefined1 *)0x0052fd6bul) /* 0052fd6b: byte */
+#define DAT_0052fd6c (*(undefined1 *)0x0052fd6cul) /* 0052fd6c: byte base, short element via cast */
+#define DAT_0052fd6e (*(undefined1 *)0x0052fd6eul) /* 0052fd6e: byte */
+#define DAT_0052fd6f (*(undefined1 *)0x0052fd6ful) /* 0052fd6f: byte */
+#define DAT_0052fd70 (*(undefined1 *)0x0052fd70ul) /* 0052fd70: byte */
+#define DAT_0052fd72 (*(undefined2 *)0x0052fd72ul) /* DAT_0052fd72: shorts at 0x30 stride; asm mov WORD */
 #define DAT_0052fd74 (*(data_u32 *)0x0052fd74ul) /* 0052fd74 */
 #define DAT_0052fd84 (*(data_u32 *)0x0052fd84ul) /* DAT_0052fd84 */
 #define DAT_0052fd88 (*(data_u32 **)0x0052fd88ul) /* 0052fd88 */
@@ -1448,7 +1448,7 @@ void bblit_port_init(void);
 #define DAT_009ca991 (*(data_u32 *)0x009ca991ul) /* 009ca991 */
 #define DAT_009ca992 (*(data_u32 *)0x009ca992ul) /* 009ca992 */
 #define DAT_009ca993 (*(data_u32 *)0x009ca993ul) /* 009ca993 */
-#define DAT_009ca9c0 (*(code **)0x009ca9c0ul) /* DAT_009ca9c0 */
+#define DAT_009ca9c0 (*(code **)&bblit_slot_cells[40]) /* DAT_009ca9c0: cell (8B stores tore image 9ca9c4 flag) */
 #define DAT_009ca9c4 (*(data_u32 *)0x009ca9c4ul) /* DAT_009ca9c4 */
 #define DAT_009ca9e0 (*(data_u32 **)0x009ca9e0ul) /* DAT_009ca9e0 */
 #define DAT_009ca9e4 (*(data_u32 *)0x009ca9e4ul) /* DAT_009ca9e4 */
